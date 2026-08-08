@@ -28,12 +28,12 @@ flowchart LR
 
 ## Environment Variables
 
-| Variable | Default | Required | Description |
-| --- | --- | --- | --- |
-| `OLLAMA_URL` | `http://localhost:11434` | No | Ollama base URL |
-| `OLLAMA_MODEL` | `deepseek-v4-flash:cloud` | No | Model used to generate commit messages |
-| `OLLAMA_BACKUP_MODEL` | - | No | Model used when generation with the primary model fails |
-| `OLLAMA_EFFORT` | `low` | No | Ollama thinking effort (`low`, `medium`, `high`, or `max`) |
+| Variable              | Default                   | Required | Description                                                |
+| --------------------- | ------------------------- | -------- | ---------------------------------------------------------- |
+| `OLLAMA_URL`          | `http://localhost:11434`  | No       | Ollama base URL                                            |
+| `OLLAMA_MODEL`        | `deepseek-v4-flash:cloud` | No       | Model used to generate commit messages                     |
+| `OLLAMA_BACKUP_MODEL` | -                         | No       | Model used when generation with the primary model fails    |
+| `OLLAMA_EFFORT`       | `low`                     | No       | Ollama thinking effort (`low`, `medium`, `high`, or `max`) |
 
 ## Setup
 
@@ -85,15 +85,15 @@ Stages all changes, scans them with Gitleaks when installed, generates a Convent
 zapdev commit
 ```
 
-| Flag | Description |
-| --- | --- |
-| `--model <model>` | Override the Ollama model |
+| Flag                | Description                                                       |
+| ------------------- | ----------------------------------------------------------------- |
+| `--model <model>`   | Override the Ollama model                                         |
 | `-t, --type <type>` | Force the Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
-| `-p, --push` | Push after committing without asking |
-| `-s, --staged` | Commit only changes that are already staged |
-| `-r, --rebase` | Rebase on upstream if the push is rejected |
-| `-m, --merge` | Merge upstream if the push is rejected |
-| `-y, --yes` | Skip prompts and commit directly |
+| `-p, --push`        | Push after committing without asking                              |
+| `-s, --staged`      | Commit only changes that are already staged                       |
+| `-r, --rebase`      | Rebase on upstream if the push is rejected                        |
+| `-m, --merge`       | Merge upstream if the push is rejected                            |
+| `-y, --yes`         | Skip prompts and commit directly                                  |
 
 ```bash
 zapdev commit -t feat      # force the type
@@ -106,6 +106,35 @@ Pushing is optimistic, with no preliminary fetch. If the branch is behind upstre
 
 Without a TTY, zapdev commits automatically and only pushes when `--push` is set.
 
+### Zed IDE
+
+For a faster review and commit workflow, review and stage changes from Zed's Git panel, then run `zapdev commit -syp` from a task. The command commits only staged changes, skips prompts, and pushes the commit.
+
+Add the following tasks to `.zed/tasks.json`:
+
+```json
+[
+  {
+    "label": "Commit and push staged changes",
+    "command": "zapdev commit -syp"
+  }
+]
+```
+
+Add this entry to Zed's `keymap.json` to run the commit task with `ctrl-cmd-enter`:
+
+```json
+{
+  "context": "Pane",
+  "bindings": {
+    "ctrl-cmd-enter": [
+      "task::Spawn",
+      { "task_name": "Commit and push staged changes" }
+    ]
+  }
+}
+```
+
 ### `zapdev reset`
 
 Operates on a Git repository or the direct child repositories of a directory. It fetches and prunes, switches branch, then permanently removes other local branches and linked worktrees.
@@ -117,12 +146,12 @@ zapdev reset -p              # switch to the principal branch without prompting
 zapdev reset -t dev          # switch to dev or fall back to the principal branch
 ```
 
-| Flag | Description |
-| --- | --- |
-| `-p, --principal` | Switch every repo to its resolved principal branch (`origin/HEAD`) |
-| `-t, --target <branch>` | Switch to a target branch, falling back to the principal branch |
-| `--pull` | Pull the checked-out branch after reset without asking |
-| `-y, --yes` | Switch and delete without confirmation |
+| Flag                    | Description                                                        |
+| ----------------------- | ------------------------------------------------------------------ |
+| `-p, --principal`       | Switch every repo to its resolved principal branch (`origin/HEAD`) |
+| `-t, --target <branch>` | Switch to a target branch, falling back to the principal branch    |
+| `--pull`                | Pull the checked-out branch after reset without asking             |
+| `-y, --yes`             | Switch and delete without confirmation                             |
 
 Deletion is permanent. Branches are removed with `git branch -D`; worktrees are removed with `git worktree remove --force`. Without a TTY, pass `--yes` or the destructive step is refused. `node_modules` is never scanned.
 
