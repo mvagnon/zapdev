@@ -10,7 +10,13 @@ export function resolveConfig(
   return {
     ollamaUrl: normalizeBaseUrl(overrides.ollamaUrl ?? env.OLLAMA_URL ?? DEFAULT_OLLAMA_URL),
     model: overrides.model ?? env.OLLAMA_MODEL ?? DEFAULT_MODEL,
+    backupModel: overrides.backupModel ?? optionalValue(env.OLLAMA_BACKUP_MODEL),
+    effort: overrides.effort ?? optionalValue(env.OLLAMA_EFFORT),
   };
+}
+
+function optionalValue(value: string | undefined): string | undefined {
+  return value?.trim() || undefined;
 }
 
 // The Ollama SDK accepted scheme-less hosts (e.g. "localhost:11434"); keep that contract.

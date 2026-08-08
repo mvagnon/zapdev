@@ -2,6 +2,7 @@ import { COMMIT_SYSTEM_PROMPT } from "../prompts";
 import type { CommitType } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 import { applyCommitType, sanitizeCommitMessage, truncateDiff } from "./commit-message";
+import { errorMessage } from "./errors";
 
 const REQUEST_TIMEOUT_MS = 25_000;
 const KEEP_ALIVE = "30m";
@@ -14,16 +15,35 @@ export async function generateCommitMessage(
   type?: CommitType,
 ): Promise<string> {
   const systemPrompt = type ? applyCommitType(COMMIT_SYSTEM_PROMPT, type) : COMMIT_SYSTEM_PROMPT;
-
-  const content = await chat(config, [
+  const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
     { role: "user", content: truncateDiff(diff) },
-  ]);
+  ];
+
+  let content: string;
+  try {
+    content = await chat(config, config.model, messages);
+  } catch (error) {
+    if (!config.backupModel || config.backupModel === config.model) throw error;
+    try {
+      content = await chat(config, config.backupModel, messages);
+    } catch (backupError) {
+      throw new AggregateError(
+        [error, backupError],
+        `Primary model failed: ${errorMessage(error)} Backup model failed: ${errorMessage(backupError)}`,
+        { cause: backupError },
+      );
+    }
+  }
 
   return sanitizeCommitMessage(content);
 }
 
-async function chat(config: ZapdevConfig, messages: ChatMessage[]): Promise<string> {
+async function chat(
+  config: ZapdevConfig,
+  model: string,
+  messages: ChatMessage[],
+): Promise<string> {
   const url = `${config.ollamaUrl}/api/chat`;
 
   let response: Response;
@@ -32,9 +52,10 @@ async function chat(config: ZapdevConfig, messages: ChatMessage[]): Promise<stri
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: config.model,
+        model,
         stream: false,
         keep_alive: KEEP_ALIVE,
+        think: config.effort,
         options: { temperature: 0.2 },
         messages,
       }),

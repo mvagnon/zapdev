@@ -7,13 +7,24 @@ describe("resolveConfig", () => {
     expect(resolveConfig({})).toEqual({
       ollamaUrl: DEFAULT_OLLAMA_URL,
       model: DEFAULT_MODEL,
+      backupModel: undefined,
+      effort: undefined,
     });
   });
 
-  it("reads OLLAMA_URL and OLLAMA_MODEL from the environment", () => {
-    expect(resolveConfig({ OLLAMA_URL: "http://host:1234", OLLAMA_MODEL: "my-model" })).toEqual({
+  it("reads Ollama settings from the environment", () => {
+    expect(
+      resolveConfig({
+        OLLAMA_URL: "http://host:1234",
+        OLLAMA_MODEL: "my-model",
+        OLLAMA_BACKUP_MODEL: "backup-model",
+        OLLAMA_EFFORT: "high",
+      }),
+    ).toEqual({
       ollamaUrl: "http://host:1234",
       model: "my-model",
+      backupModel: "backup-model",
+      effort: "high",
     });
   });
 
@@ -21,6 +32,17 @@ describe("resolveConfig", () => {
     expect(resolveConfig({ OLLAMA_MODEL: "env-model" }, { model: "flag-model" })).toEqual({
       ollamaUrl: DEFAULT_OLLAMA_URL,
       model: "flag-model",
+      backupModel: undefined,
+      effort: undefined,
+    });
+  });
+
+  it("ignores empty optional settings", () => {
+    expect(resolveConfig({ OLLAMA_BACKUP_MODEL: " ", OLLAMA_EFFORT: "" })).toEqual({
+      ollamaUrl: DEFAULT_OLLAMA_URL,
+      model: DEFAULT_MODEL,
+      backupModel: undefined,
+      effort: undefined,
     });
   });
 
