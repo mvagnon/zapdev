@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/mvagnon/zapdev/compare/v0.10.0...v0.11.0) (2026-08-08)
+
+
+### Features
+
+* **config:** add default value for OLLAMA_EFFORT ([88bd396](https://github.com/mvagnon/zapdev/commit/88bd39632d0bb91037c791275a8a50579a4b8b4c))
+
 ## [0.10.0](https://github.com/mvagnon/zapdev/compare/v0.9.0...v0.10.0) (2026-08-08)
 
 
