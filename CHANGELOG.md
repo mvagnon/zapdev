@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/mvagnon/zapdev/compare/v0.9.0...v0.10.0) (2026-08-08)
+
+
+### Features
+
+* **config:** add backup model and thinking effort support ([cbbb643](https://github.com/mvagnon/zapdev/commit/cbbb643163f903bfe088c75d2d81f585b6b70d9b))
+* **docs:** expand README and enhance commit command options ([7aa3520](https://github.com/mvagnon/zapdev/commit/7aa352086164a540227938980dec409736710fa9))
+
 ## [0.9.0](https://github.com/mvagnon/zapdev/compare/v0.8.0...v0.9.0) (2026-07-20)
 
 

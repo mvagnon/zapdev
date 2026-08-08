@@ -1,6 +1,6 @@
 {
   "name": "zapdev",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Fast, performant and lightweight git chores and dev tools using your terminal and your own local LLM.",
   "type": "module",
   "bin": {
