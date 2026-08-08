@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL, resolveConfig } from "./config";
+import { DEFAULT_EFFORT, DEFAULT_MODEL, DEFAULT_OLLAMA_URL, resolveConfig } from "./config";
 
 describe("resolveConfig", () => {
   it("falls back to defaults when nothing is set", () => {
@@ -8,7 +8,7 @@ describe("resolveConfig", () => {
       ollamaUrl: DEFAULT_OLLAMA_URL,
       model: DEFAULT_MODEL,
       backupModel: undefined,
-      effort: undefined,
+      effort: DEFAULT_EFFORT,
     });
   });
 
@@ -33,7 +33,7 @@ describe("resolveConfig", () => {
       ollamaUrl: DEFAULT_OLLAMA_URL,
       model: "flag-model",
       backupModel: undefined,
-      effort: undefined,
+      effort: DEFAULT_EFFORT,
     });
   });
 
@@ -42,7 +42,7 @@ describe("resolveConfig", () => {
       ollamaUrl: DEFAULT_OLLAMA_URL,
       model: DEFAULT_MODEL,
       backupModel: undefined,
-      effort: undefined,
+      effort: DEFAULT_EFFORT,
     });
   });
 

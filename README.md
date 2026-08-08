@@ -33,7 +33,7 @@ flowchart LR
 | `OLLAMA_URL` | `http://localhost:11434` | No | Ollama base URL |
 | `OLLAMA_MODEL` | `deepseek-v4-flash:cloud` | No | Model used to generate commit messages |
 | `OLLAMA_BACKUP_MODEL` | - | No | Model used when generation with the primary model fails |
-| `OLLAMA_EFFORT` | - | No | Ollama thinking effort (`low`, `medium`, `high`, or `max`) |
+| `OLLAMA_EFFORT` | `low` | No | Ollama thinking effort (`low`, `medium`, `high`, or `max`) |
 
 ## Setup
 

@@ -2,6 +2,7 @@ import type { ZapdevConfig } from "../types/config";
 
 export const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 export const DEFAULT_MODEL = "deepseek-v4-flash:cloud";
+export const DEFAULT_EFFORT = "low";
 
 export function resolveConfig(
   env: Record<string, string | undefined> = process.env,
@@ -11,7 +12,7 @@ export function resolveConfig(
     ollamaUrl: normalizeBaseUrl(overrides.ollamaUrl ?? env.OLLAMA_URL ?? DEFAULT_OLLAMA_URL),
     model: overrides.model ?? env.OLLAMA_MODEL ?? DEFAULT_MODEL,
     backupModel: overrides.backupModel ?? optionalValue(env.OLLAMA_BACKUP_MODEL),
-    effort: overrides.effort ?? optionalValue(env.OLLAMA_EFFORT),
+    effort: overrides.effort ?? optionalValue(env.OLLAMA_EFFORT) ?? DEFAULT_EFFORT,
   };
 }
 
