@@ -20,16 +20,20 @@ import {
   fetchRemote,
   getStagedDiff,
   hasUpstream,
+  pullMerge,
   pullRebase,
   push,
   pushSetUpstream,
   stageAll,
 } from "../lib/git";
 import { errorMessage } from "../lib/errors";
+import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/ollama";
 import { COMMIT_TYPES } from "../types/commit";
 
 type CommitAction = "commit" | "edit" | "cancel";
+type SyncStrategy = "rebase" | "merge";
+type SyncAction = SyncStrategy | "quit";
 
 export const commitCommand = defineCommand({
   meta: {
@@ -40,7 +44,6 @@ export const commitCommand = defineCommand({
   args: {
     model: {
       type: "string",
-      alias: "m",
       description: "Override the Ollama model (defaults to $OLLAMA_MODEL).",
     },
     type: {
@@ -52,6 +55,21 @@ export const commitCommand = defineCommand({
       type: "boolean",
       alias: "p",
       description: "Push after committing without asking.",
+    },
+    staged: {
+      type: "boolean",
+      alias: "s",
+      description: "Commit only changes that are already staged.",
+    },
+    rebase: {
+      type: "boolean",
+      alias: "r",
+      description: "Rebase on the upstream branch if the push is rejected.",
+    },
+    merge: {
+      type: "boolean",
+      alias: "m",
+      description: "Merge the upstream branch if the push is rejected.",
     },
     yes: {
       type: "boolean",
@@ -66,6 +84,18 @@ export const commitCommand = defineCommand({
       args.model ? { model: args.model } : {},
     );
 
+    if (args.rebase && args.merge) {
+      log.error("Choose either --rebase or --merge, not both.");
+      process.exitCode = 1;
+      return;
+    }
+
+    const syncStrategy: SyncStrategy | undefined = args.rebase
+      ? "rebase"
+      : args.merge
+        ? "merge"
+        : undefined;
+
     const type = args.type ? normalizeCommitType(args.type) : undefined;
     if (type === null) {
       log.error(
@@ -77,11 +107,31 @@ export const commitCommand = defineCommand({
 
     if (interactive) intro("zapdev commit");
 
-    await stageAll();
+    if (!args.staged) await stageAll();
     const diff = await getStagedDiff();
     if (!diff.trim()) {
       log.warn("Nothing to commit.");
       if (interactive) outro("Nothing to do.");
+      return;
+    }
+
+    try {
+      if (await hasGitleaks()) {
+        const scanLoader = interactive ? spinner() : undefined;
+        scanLoader?.start("Scanning staged changes with Gitleaks");
+        try {
+          await scanStagedChanges();
+          scanLoader?.stop("No leaks found");
+        } catch (error) {
+          scanLoader?.error("Gitleaks check failed");
+          throw error;
+        }
+      } else {
+        log.info("Gitleaks not found, skipping secret scan.");
+      }
+    } catch (error) {
+      log.error(`Gitleaks check failed: ${errorMessage(error)}`);
+      process.exitCode = 1;
       return;
     }
 
@@ -157,7 +207,11 @@ export const commitCommand = defineCommand({
     }
 
     if (shouldPush) {
-      const pushed = await pushOptimistic(interactive);
+      const pushed = await pushOptimistic(
+        interactive,
+        interactive && !args.yes,
+        syncStrategy,
+      );
       if (!pushed) {
         process.exitCode = 1;
         return;
@@ -168,18 +222,20 @@ export const commitCommand = defineCommand({
   },
 });
 
-// Rebases the current branch onto its upstream. Returns false on a rebase
-// conflict so the caller stops before pushing.
-async function rebaseOnUpstream(interactive: boolean): Promise<boolean> {
+async function syncWithUpstream(
+  strategy: SyncStrategy,
+  interactive: boolean,
+): Promise<boolean> {
   const loader = interactive ? spinner() : undefined;
-  loader?.start("Pulling --rebase");
+  const label = strategy === "rebase" ? "Rebase" : "Merge";
+  loader?.start(`Pulling --${strategy === "rebase" ? "rebase" : "no-rebase"}`);
   try {
-    await pullRebase();
-    loader?.stop("✓ Rebased on upstream");
+    await (strategy === "rebase" ? pullRebase() : pullMerge());
+    loader?.stop(strategy === "rebase" ? "✓ Rebased on upstream" : "✓ Merged upstream");
     return true;
   } catch (error) {
-    loader?.error("Rebase failed");
-    log.error(`Rebase failed (resolve conflicts, then push): ${errorMessage(error)}`);
+    loader?.error(`${label} failed`);
+    log.error(`${label} failed (resolve conflicts, then push): ${errorMessage(error)}`);
     return false;
   }
 }
@@ -187,8 +243,12 @@ async function rebaseOnUpstream(interactive: boolean): Promise<boolean> {
 // Pushes without a preliminary fetch, so the common case stays a single round-trip.
 // On failure, diagnoses "behind upstream" by fetching and comparing (only on this
 // rare path) rather than parsing stderr. A behind rejection is recovered
-// automatically: rebase onto upstream, then retry the push once.
-async function pushOptimistic(interactive: boolean): Promise<boolean> {
+// with the selected strategy, then retry the push once.
+async function pushOptimistic(
+  interactive: boolean,
+  canPrompt: boolean,
+  strategy?: SyncStrategy,
+): Promise<boolean> {
   const [upstream, branch] = await Promise.all([hasUpstream(), currentBranch()]);
   const doPush = () => (upstream ? push() : pushSetUpstream(branch));
 
@@ -196,7 +256,8 @@ async function pushOptimistic(interactive: boolean): Promise<boolean> {
   if (first.ok) return true;
 
   if (upstream && (await isBehind(interactive))) {
-    if (!(await rebaseOnUpstream(interactive))) return false;
+    const syncStrategy = strategy ?? (await chooseSyncStrategy(canPrompt));
+    if (!syncStrategy || !(await syncWithUpstream(syncStrategy, interactive))) return false;
 
     const retry = await tryPush(interactive, doPush);
     if (retry.ok) return true;
@@ -206,6 +267,29 @@ async function pushOptimistic(interactive: boolean): Promise<boolean> {
 
   log.error(`Push failed: ${errorMessage(first.error)}`);
   return false;
+}
+
+async function chooseSyncStrategy(interactive: boolean): Promise<SyncStrategy | null> {
+  if (!interactive) {
+    log.error("Branch is behind upstream. Re-run with --rebase or --merge.");
+    return null;
+  }
+
+  const action = await select<SyncAction>({
+    message: "Branch is behind upstream. How should zapdev sync it?",
+    options: [
+      { value: "rebase", label: "Rebase" },
+      { value: "merge", label: "Merge" },
+      { value: "quit", label: "Quit" },
+    ],
+  });
+
+  if (isCancel(action) || action === "quit") {
+    log.warn("Push cancelled. Commit remains local.");
+    return null;
+  }
+
+  return action;
 }
 
 type PushResult = { ok: true } | { ok: false; error: unknown };

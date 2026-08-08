@@ -56,6 +56,10 @@ export async function pullRebase(): Promise<void> {
   await git(["pull", "--rebase"]);
 }
 
+export async function pullMerge(): Promise<void> {
+  await git(["pull", "--no-rebase", "--no-edit"]);
+}
+
 export async function fetchRemote(): Promise<void> {
   await git(["fetch"]);
 }

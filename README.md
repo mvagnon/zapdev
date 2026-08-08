@@ -1,15 +1,53 @@
 # zapdev
 
-**zapdev** — a lightweight TypeScript CLI that makes small, repetitive git chores fast and precise.
+## Project Introduction
 
-## Requirements
+**zapdev** is a lightweight TypeScript CLI that makes small, repetitive Git chores fast and precise.
 
-Node.js >= 20 and git.
+It stages changes, scans them for secrets, generates Conventional Commit messages with Ollama, and streamlines repository cleanup.
 
-## Install
+## Project Architecture
+
+```mermaid
+flowchart LR
+  Entry["src/index.ts"] --> CLI["src/cli.ts"]
+  CLI --> Commands["src/commands"]
+  Commands --> Lib["src/lib"]
+  Commands --> Types["src/types"]
+  Lib --> Prompts["src/prompts"]
+  Lib --> Types
+  Lib --> Tools["Git, Gitleaks, Ollama"]
+```
+
+- `src/index.ts`: bin launcher; enables the V8 compile cache, then loads `cli.js`.
+- `src/cli.ts`: CLI entry; registers subcommands and opens the interactive menu.
+- `src/commands/`: command UI and orchestration.
+- `src/lib/`: pure logic and isolated Git, Gitleaks, and Ollama side effects.
+- `src/prompts/`: LLM prompts inlined into the bundle at build time.
+- `src/types/`: shared type declarations.
+
+## Environment Variables
+
+| Variable | Default | Required | Description |
+| --- | --- | --- | --- |
+| `OLLAMA_URL` | `http://localhost:11434` | No | Ollama base URL |
+| `OLLAMA_MODEL` | `deepseek-v4-flash:cloud` | No | Model used to generate commit messages |
+
+## Setup
+
+### Requirements
+
+- **Node.js >= 20 (required):** runs the CLI.
+- **Git (required):** provides the repository operations.
+- **Ollama (required for `commit`):** generates Conventional Commit messages.
+- **Gitleaks (recommended):** scans staged changes before message generation when available on `PATH`.
+
+### Install
+
+Install zapdev globally for daily use:
 
 ```bash
-npm install -g zapdev   # installs the `zapdev` command globally
+npm install -g zapdev
 ```
 
 Or run it once without installing:
@@ -18,74 +56,7 @@ Or run it once without installing:
 npx zapdev commit
 ```
 
-> For daily use, prefer the global install: `npx` adds resolution overhead on every run.
-
-## Usage
-
-Run `zapdev` with no command to pick one from an interactive menu (falls back to usage output without a TTY).
-
-### `zapdev commit`
-
-Stages all changes (`git add -A`), asks an Ollama model for a one-line Conventional Commits message, then lets you commit, edit or cancel, and optionally push.
-
-```bash
-zapdev commit
-```
-
-| Flag | Description |
-| --- | --- |
-| `-m, --model <model>` | Override the Ollama model |
-| `-t, --type <type>` | Force the Conventional Commits type (`feat`, `fix`, `chore`, …) |
-| `-p, --push` | Push after committing without asking |
-| `-y, --yes` | Skip prompts and commit directly |
-
-```bash
-zapdev commit -t feat      # force the type; the model still writes scope + description
-```
-
-Pushing is optimistic — no preliminary fetch, so the common case stays a single round-trip. If the push is rejected because the branch is behind its upstream, zapdev automatically runs `git pull --rebase` and retries the push once — no prompt, in every mode. A rebase conflict stops before pushing so you can resolve it, then re-run.
-
-Without a TTY (piped / CI), it commits automatically and only pushes when `--push` is set.
-
-### `zapdev reset`
-
-Operates on a git repo, or — when the path is a plain directory — on its **direct child** repos (level 1, non-recursive). For each one: `git fetch --prune`, switch to a branch (chosen interactively, or forced with `--principal` / `--target`), then permanently delete every other local branch and every linked worktree. The principal branch (from `origin/HEAD`) and the branch you switched to are always kept. Ends with an optional `pull`.
-
-```bash
-zapdev reset                 # the current repo, or the child repos of the current directory
-zapdev reset ~/dev           # a repo, or the child repos of a directory
-zapdev reset -p              # switch each repo to its principal branch, no prompt
-zapdev reset -t dev          # switch each repo to `dev` (or principal if absent)
-```
-
-| Flag | Description |
-| --- | --- |
-| `-p, --principal` | Switch every repo to its resolved principal branch (`origin/HEAD`) |
-| `-t, --target <branch>` | Switch every repo to `<branch>`, falling back to the principal one |
-| `--pull` | Pull the checked-out branch after reset without asking |
-| `-y, --yes` | Non-interactive: switch and delete without confirmation |
-
-Deletion is permanent: branches via `git branch -D` (force), worktrees via `git worktree remove --force`. Worktrees are removed first so the branches they held become deletable. Without a TTY, pass `--yes` — otherwise the destructive step is refused. `node_modules` is never scanned.
-
-## Shell aliases
-
-`--yes` skips every prompt, which is exactly what you want behind a short alias. Two that pay off daily — add them to `~/.zshrc` or `~/.bashrc`:
-
-```bash
-alias commit="zapdev commit --yes"                        # stage → generate message → commit, no prompts
-alias git-reset="zapdev reset --yes --principal --pull"   # switch each repo to its principal branch, wipe the rest, then pull
-```
-
-`commit` collapses the whole stage → message → commit flow into one word. `git-reset` brings a workspace back to a clean principal state in one shot — point it at a parent directory to reset every child repo at once.
-
-## Configuration
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
-| `OLLAMA_MODEL` | `deepseek-v4-flash:cloud` | Model used to generate messages |
-
-## Development
+### Development Setup
 
 From a clone:
 
@@ -95,16 +66,71 @@ npm run zapdev      # build then run the CLI in dev
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint
 npm run test        # vitest
-npm run build       # bundle to dist/ (esbuild)
+npm run build       # bundle to dist/ with esbuild
 ```
 
-`npm link` (after `npm run build`) exposes the local `zapdev` binary on your PATH.
+`npm link` exposes the local `zapdev` binary after `npm run build`.
 
-## Project structure
+## Usage
 
-- `src/index.ts` — bin launcher; enables the V8 compile cache, then loads `cli.js`.
-- `src/cli.ts` — CLI entry (Citty); registers subcommands, defaults to `commit`.
-- `src/commands/` — one file per command.
-- `src/lib/` — pure logic (`config`, `commit-message`, `branches`, unit-tested) and side effects (`git`, `ollama`); shared helpers (`errors`).
-- `src/prompts/` — LLM prompts as `.md` files, imported as text (esbuild `.md` text loader) and inlined into the bundle at build time.
-- `src/types/` — shared type declarations (one file per domain) and ambient module declarations.
+Run `zapdev` with no command to pick one from an interactive menu. Without a TTY, zapdev displays its usage instead.
+
+### `zapdev commit`
+
+Stages all changes, scans them with Gitleaks when installed, generates a Conventional Commit message, and optionally pushes the commit.
+
+```bash
+zapdev commit
+```
+
+| Flag | Description |
+| --- | --- |
+| `--model <model>` | Override the Ollama model |
+| `-t, --type <type>` | Force the Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
+| `-p, --push` | Push after committing without asking |
+| `-s, --staged` | Commit only changes that are already staged |
+| `-r, --rebase` | Rebase on upstream if the push is rejected |
+| `-m, --merge` | Merge upstream if the push is rejected |
+| `-y, --yes` | Skip prompts and commit directly |
+
+```bash
+zapdev commit -t feat      # force the type
+zapdev commit --staged     # leave unstaged changes untouched
+```
+
+Before contacting Ollama, zapdev runs `gitleaks git --staged` when Gitleaks is installed. A failed scan stops the commit; when Gitleaks is absent, the scan is skipped.
+
+Pushing is optimistic, with no preliminary fetch. If the branch is behind upstream, `--rebase` runs `git pull --rebase`, while `--merge` runs `git pull --no-rebase --no-edit`; zapdev then retries once. Without either flag, interactive runs ask whether to rebase, merge, or quit. Runs using `--yes` or without a TTY must provide one of the flags.
+
+Without a TTY, zapdev commits automatically and only pushes when `--push` is set.
+
+### `zapdev reset`
+
+Operates on a Git repository or the direct child repositories of a directory. It fetches and prunes, switches branch, then permanently removes other local branches and linked worktrees.
+
+```bash
+zapdev reset                 # reset the current repo or direct child repos
+zapdev reset ~/dev           # reset repos under a directory
+zapdev reset -p              # switch to the principal branch without prompting
+zapdev reset -t dev          # switch to dev or fall back to the principal branch
+```
+
+| Flag | Description |
+| --- | --- |
+| `-p, --principal` | Switch every repo to its resolved principal branch (`origin/HEAD`) |
+| `-t, --target <branch>` | Switch to a target branch, falling back to the principal branch |
+| `--pull` | Pull the checked-out branch after reset without asking |
+| `-y, --yes` | Switch and delete without confirmation |
+
+Deletion is permanent. Branches are removed with `git branch -D`; worktrees are removed with `git worktree remove --force`. Without a TTY, pass `--yes` or the destructive step is refused. `node_modules` is never scanned.
+
+### Shell Aliases
+
+```bash
+alias commit="zapdev commit --yes"
+alias git-reset="zapdev reset --yes --principal --pull"
+```
+
+## Other
+
+zapdev is available under the MIT license.
