@@ -115,8 +115,11 @@ Add the following tasks to `.zed/tasks.json`:
 ```json
 [
   {
-    "label": "Commit and push staged changes",
-    "command": "zapdev commit -syp"
+    "label": "Safely commit staged changes.",
+    "command": "zapdev commit -s",
+    "reveal": "always",
+    "hide": "on_success",
+    "reveal_target": "center"
   }
 ]
 ```
@@ -129,7 +132,7 @@ Add this entry to Zed's `keymap.json` to run the commit task with `ctrl-cmd-ente
   "bindings": {
     "ctrl-cmd-enter": [
       "task::Spawn",
-      { "task_name": "Commit and push staged changes" }
+      { "task_name": "Safely commit staged changes." }
     ]
   }
 }
