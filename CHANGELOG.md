@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/mvagnon/zapdev/compare/v0.11.0...v1.0.0) (2026-09-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* require ZD_URL, ZD_MODEL and ZD_EFFORT instead of OLLAMA_* settings.
+
+### Features
+
+* replace Ollama integration with OpenAI-compatible endpoints ([ae97763](https://github.com/mvagnon/zapdev/commit/ae97763a02c953b841a6f54295116fd34c8f1dad))
+
 ## [0.11.0](https://github.com/mvagnon/zapdev/compare/v0.10.0...v0.11.0) (2026-08-08)
 
 
