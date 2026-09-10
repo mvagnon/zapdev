@@ -1,6 +1,6 @@
+/** Explicit configuration for an OpenAI-compatible Chat Completions endpoint. */
 export type ZapdevConfig = {
-  ollamaUrl: string;
+  url: string;
   model: string;
-  backupModel?: string;
-  effort?: string;
+  effort: string;
 };

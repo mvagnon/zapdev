@@ -11,7 +11,7 @@ zapdev is a lightweight CLI made in TypeScript to help developers make the small
 - `ESLint` for linting
 - `Vitest` for unit testing
 
-And Node.js (>= 20) as a runtime, npm as package manager. Ollama is called over plain `fetch` (`src/lib/ollama.ts`) — no SDK. The published package has zero runtime `dependencies`: everything is inlined in the bundle.
+And Node.js (>= 20) as a runtime, npm as package manager. An OpenAI-compatible Chat Completions endpoint is called over plain `fetch` (`src/lib/llm.ts`), configured explicitly with `ZD_URL`, `ZD_MODEL`, and `ZD_EFFORT`; no SDK. The published package has zero runtime `dependencies`: everything is inlined in the bundle.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ And Node.js (>= 20) as a runtime, npm as package manager. Ollama is called over 
 - `src/index.ts` — bin launcher; enables the V8 compile cache, then dynamically imports `cli.js`.
 - `src/cli.ts` — CLI entry (Citty); registers subcommands, defaults to `commit`.
 - `src/commands/` — one file per command. UI and orchestration only (prompts, spinners, control flow); delegate real work to `lib/`.
-- `src/lib/` — the logic. Pure, testable functions (validation, transformation, parsing) that are unit-tested, and side effects (`git`, `ollama`) isolated in their own modules; shared helpers (`errors`).
+- `src/lib/` — the logic. Pure, testable functions (validation, transformation, parsing) that are unit-tested, and side effects (`git`, `llm`) isolated in their own modules; shared helpers (`errors`).
 - `src/prompts/` — LLM prompts as `.md` files, imported as text (esbuild `.md` text loader) and inlined into the bundle at build time.
 - `src/types/` — shared type declarations, one file per domain (`config.ts`, `commit.ts`), plus ambient module declarations (`markdown.d.ts`).
 

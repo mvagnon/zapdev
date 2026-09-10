@@ -1,7 +1,7 @@
 {
   "name": "zapdev",
   "version": "0.11.0",
-  "description": "Fast, performant and lightweight git chores and dev tools using your terminal and your own local LLM.",
+  "description": "Fast, performant and lightweight git chores and dev tools using your terminal and an OpenAI-compatible LLM endpoint.",
   "type": "module",
   "bin": {
     "zapdev": "./dist/index.js"
@@ -17,7 +17,6 @@
     "cli",
     "commit",
     "conventional-commits",
-    "ollama",
     "llm",
     "ai"
   ],
