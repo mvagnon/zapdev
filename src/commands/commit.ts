@@ -28,8 +28,9 @@ import {
 } from "../lib/git";
 import { errorMessage } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
-import { generateCommitMessage } from "../lib/ollama";
+import { generateCommitMessage } from "../lib/llm";
 import { COMMIT_TYPES } from "../types/commit";
+import type { ZapdevConfig } from "../types/config";
 
 type CommitAction = "commit" | "edit" | "cancel";
 type SyncStrategy = "rebase" | "merge";
@@ -42,9 +43,17 @@ export const commitCommand = defineCommand({
       "Stage all changes and commit with an LLM-generated Conventional Commits message.",
   },
   args: {
+    url: {
+      type: "string",
+      description: "Override $ZD_URL, the complete Chat Completions endpoint.",
+    },
     model: {
       type: "string",
-      description: "Override the Ollama model (defaults to $OLLAMA_MODEL).",
+      description: "Override the model configured with $ZD_MODEL.",
+    },
+    effort: {
+      type: "string",
+      description: "Override $ZD_EFFORT, sent as reasoning_effort.",
     },
     type: {
       type: "string",
@@ -79,10 +88,6 @@ export const commitCommand = defineCommand({
   },
   async run({ args }) {
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-    const config = resolveConfig(
-      process.env,
-      args.model ? { model: args.model } : {},
-    );
 
     if (args.rebase && args.merge) {
       log.error("Choose either --rebase or --merge, not both.");
@@ -101,6 +106,19 @@ export const commitCommand = defineCommand({
       log.error(
         `Invalid type "${args.type}". Valid types: ${COMMIT_TYPES.join(", ")}.`,
       );
+      process.exitCode = 1;
+      return;
+    }
+
+    let config: ZapdevConfig;
+    try {
+      config = resolveConfig(process.env, {
+        url: args.url,
+        model: args.model,
+        effort: args.effort,
+      });
+    } catch (error) {
+      log.error(errorMessage(error));
       process.exitCode = 1;
       return;
     }

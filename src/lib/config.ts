@@ -1,27 +1,27 @@
 import type { ZapdevConfig } from "../types/config";
 
-export const DEFAULT_OLLAMA_URL = "http://localhost:11434";
-export const DEFAULT_MODEL = "deepseek-v4-flash:cloud";
-export const DEFAULT_EFFORT = "low";
-
+/** Resolve required settings, with CLI overrides taking precedence over environment variables. */
 export function resolveConfig(
   env: Record<string, string | undefined> = process.env,
   overrides: Partial<ZapdevConfig> = {},
 ): ZapdevConfig {
-  return {
-    ollamaUrl: normalizeBaseUrl(overrides.ollamaUrl ?? env.OLLAMA_URL ?? DEFAULT_OLLAMA_URL),
-    model: overrides.model ?? env.OLLAMA_MODEL ?? DEFAULT_MODEL,
-    backupModel: overrides.backupModel ?? optionalValue(env.OLLAMA_BACKUP_MODEL),
-    effort: overrides.effort ?? optionalValue(env.OLLAMA_EFFORT) ?? DEFAULT_EFFORT,
+  const config = {
+    url: (overrides.url ?? env.ZD_URL)?.trim() ?? "",
+    model: (overrides.model ?? env.ZD_MODEL)?.trim() ?? "",
+    effort: (overrides.effort ?? env.ZD_EFFORT)?.trim() ?? "",
   };
-}
+  for (const [key, value] of Object.entries(config)) {
+    if (!value) throw new Error(`Set ZD_${key.toUpperCase()} or --${key} before generating a commit message.`);
+  }
 
-function optionalValue(value: string | undefined): string | undefined {
-  return value?.trim() || undefined;
-}
-
-// The Ollama SDK accepted scheme-less hosts (e.g. "localhost:11434"); keep that contract.
-function normalizeBaseUrl(raw: string): string {
-  const trimmed = raw.trim().replace(/\/+$/, "");
-  return /^https?:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`;
+  let url: URL;
+  try {
+    url = new URL(config.url);
+  } catch {
+    throw new Error("URL must be a complete HTTP(S) Chat Completions endpoint.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("URL must be a complete HTTP(S) Chat Completions endpoint.");
+  }
+  return config;
 }

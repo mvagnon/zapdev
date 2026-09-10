@@ -1,60 +1,44 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_EFFORT, DEFAULT_MODEL, DEFAULT_OLLAMA_URL, resolveConfig } from "./config";
+import { resolveConfig } from "./config";
+
+const env = { ZD_URL: "http://localhost:1234/v1/chat/completions", ZD_MODEL: "my-model", ZD_EFFORT: "low" };
 
 describe("resolveConfig", () => {
-  it("falls back to defaults when nothing is set", () => {
-    expect(resolveConfig({})).toEqual({
-      ollamaUrl: DEFAULT_OLLAMA_URL,
-      model: DEFAULT_MODEL,
-      backupModel: undefined,
-      effort: DEFAULT_EFFORT,
-    });
+  it("requires explicit configuration instead of defaults or legacy settings", () => {
+    expect(() => resolveConfig({})).toThrow("Set ZD_URL");
+    expect(() => resolveConfig({
+      OLLAMA_URL: env.ZD_URL, OLLAMA_MODEL: env.ZD_MODEL, OLLAMA_EFFORT: env.ZD_EFFORT,
+      URL: env.ZD_URL, MODEL: env.ZD_MODEL, EFFORT: env.ZD_EFFORT,
+    })).toThrow("Set ZD_URL");
   });
 
-  it("reads Ollama settings from the environment", () => {
-    expect(
-      resolveConfig({
-        OLLAMA_URL: "http://host:1234",
-        OLLAMA_MODEL: "my-model",
-        OLLAMA_BACKUP_MODEL: "backup-model",
-        OLLAMA_EFFORT: "high",
-      }),
-    ).toEqual({
-      ollamaUrl: "http://host:1234",
-      model: "my-model",
-      backupModel: "backup-model",
-      effort: "high",
+  it("reads and trims settings without changing the endpoint path or query", () => {
+    const url = "https://host/custom/chat/?version=1";
+    expect(resolveConfig({ ZD_URL: ` ${url} `, ZD_MODEL: " my-model ", ZD_EFFORT: " low " })).toEqual({
+      url, model: "my-model", effort: "low",
     });
   });
 
   it("prefers explicit overrides over the environment", () => {
-    expect(resolveConfig({ OLLAMA_MODEL: "env-model" }, { model: "flag-model" })).toEqual({
-      ollamaUrl: DEFAULT_OLLAMA_URL,
-      model: "flag-model",
-      backupModel: undefined,
-      effort: DEFAULT_EFFORT,
-    });
+    const overrides = { url: "https://host/chat/completions", model: "flag-model", effort: "high" };
+    expect(resolveConfig(env, overrides)).toEqual(overrides);
+    expect(resolveConfig({}, overrides)).toEqual(overrides);
   });
 
-  it("ignores empty optional settings", () => {
-    expect(resolveConfig({ OLLAMA_BACKUP_MODEL: " ", OLLAMA_EFFORT: "" })).toEqual({
-      ollamaUrl: DEFAULT_OLLAMA_URL,
-      model: DEFAULT_MODEL,
-      backupModel: undefined,
-      effort: DEFAULT_EFFORT,
-    });
+  it.each(["ZD_URL", "ZD_MODEL", "ZD_EFFORT"])("rejects missing or blank %s", (key) => {
+    for (const value of [undefined, "", "  "]) {
+      expect(() => resolveConfig({ ...env, [key]: value })).toThrow(`Set ${key}`);
+    }
   });
 
-  it("normalizes the Ollama URL", () => {
-    expect(resolveConfig({ OLLAMA_URL: "localhost:11434" }).ollamaUrl).toBe(
-      "http://localhost:11434",
-    );
-    expect(resolveConfig({ OLLAMA_URL: "https://host:1234/" }).ollamaUrl).toBe(
-      "https://host:1234",
-    );
-    expect(resolveConfig({ OLLAMA_URL: " http://host:1234 " }).ollamaUrl).toBe(
-      "http://host:1234",
-    );
+  it("rejects an empty override instead of falling back to the environment", () => {
+    expect(() => resolveConfig(env, { model: " " })).toThrow("Set ZD_MODEL");
   });
+
+  it.each(["localhost:1234", "not a URL", "/v1/chat/completions", "ftp://host/chat"])(
+    "rejects invalid HTTP endpoints: %s", (url) => {
+      expect(() => resolveConfig({ ...env, ZD_URL: url })).toThrow("complete HTTP(S)");
+    },
+  );
 });
