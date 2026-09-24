@@ -3,14 +3,9 @@ import { join } from "node:path";
 
 import { x } from "tinyexec";
 
-import type { Worktree } from "../types/worktree";
-import { parseBranches, parseDefaultBranch } from "./branches";
-import { parseWorktrees } from "./worktrees";
-
 const UPSTREAM_REF = "@{upstream}";
-const BRANCH_FORMAT = "%(refname:short)";
 
-async function git(args: string[], cwd?: string): Promise<string> {
+async function git(args: string[], cwd: string): Promise<string> {
   const result = await x("git", args, { nodeOptions: { cwd } });
   if (result.exitCode !== 0) {
     throw new Error(result.stderr.trim() || `git ${args.join(" ")} failed`);
@@ -18,132 +13,82 @@ async function git(args: string[], cwd?: string): Promise<string> {
   return result.stdout;
 }
 
-async function tryGit(args: string[], cwd?: string): Promise<string | null> {
+async function tryGit(args: string[], cwd: string): Promise<string | null> {
   const result = await x("git", args, { nodeOptions: { cwd } });
   return result.exitCode === 0 ? result.stdout : null;
 }
 
-export async function stageAll(): Promise<void> {
-  await git(["add", "-A"]);
+/** Stage all changes in the given repository. */
+export async function stageAll(repo: string): Promise<void> {
+  await git(["add", "-A"], repo);
 }
 
-export async function getStagedDiff(): Promise<string> {
-  return git(["diff", "--cached"]);
+/** Read the staged diff of the given repository. */
+export async function getStagedDiff(repo: string): Promise<string> {
+  return git(["diff", "--cached"], repo);
 }
 
-export async function commit(message: string): Promise<void> {
-  await git(["commit", "-m", message]);
+/** Commit the staged changes in the given repository. */
+export async function commit(repo: string, message: string): Promise<void> {
+  await git(["commit", "-m", message], repo);
 }
 
-export async function currentBranch(): Promise<string> {
-  return (await git(["symbolic-ref", "--short", "HEAD"])).trim();
+/** Resolve the current branch, failing for a detached HEAD. */
+export async function currentBranch(repo: string): Promise<string> {
+  return (await git(["symbolic-ref", "--short", "HEAD"], repo)).trim();
 }
 
-export async function hasUpstream(): Promise<boolean> {
-  const result = await tryGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", UPSTREAM_REF]);
+/** Check whether the current branch tracks an upstream. */
+export async function hasUpstream(repo: string): Promise<boolean> {
+  const result = await tryGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", UPSTREAM_REF], repo);
   return result !== null;
 }
 
-export async function push(): Promise<void> {
-  await git(["push"]);
+/** Push the given repository's current branch. */
+export async function push(repo: string): Promise<void> {
+  await git(["push"], repo);
 }
 
-export async function pushSetUpstream(branch: string): Promise<void> {
-  await git(["push", "-u", "origin", branch]);
+/** Push a branch to origin and configure its upstream. */
+export async function pushSetUpstream(repo: string, branch: string): Promise<void> {
+  await git(["push", "-u", "origin", branch], repo);
 }
 
-export async function pullRebase(): Promise<void> {
-  await git(["pull", "--rebase"]);
+/** Rebase the current branch on its upstream. */
+export async function pullRebase(repo: string): Promise<void> {
+  await git(["pull", "--rebase"], repo);
 }
 
-export async function pullMerge(): Promise<void> {
-  await git(["pull", "--no-rebase", "--no-edit"]);
+/** Merge the upstream into the current branch. */
+export async function pullMerge(repo: string): Promise<void> {
+  await git(["pull", "--no-rebase", "--no-edit"], repo);
 }
 
-export async function fetchRemote(): Promise<void> {
-  await git(["fetch"]);
+/** Fetch the given repository's remote references. */
+export async function fetchRemote(repo: string): Promise<void> {
+  await git(["fetch"], repo);
 }
 
-// Commits on the upstream not yet in HEAD. Zero when there is no upstream.
-// Reflects the last fetched state, so fetch first for an up-to-date count.
-export async function behindCount(): Promise<number> {
-  const out = await tryGit(["rev-list", "--count", `HEAD..${UPSTREAM_REF}`]);
+/** Count upstream commits missing from HEAD using the last fetched state. */
+export async function behindCount(repo: string): Promise<number> {
+  const out = await tryGit(["rev-list", "--count", `HEAD..${UPSTREAM_REF}`], repo);
   return out === null ? 0 : Number(out.trim()) || 0;
 }
 
-// If `path` is itself a repo, reset operates on it alone; otherwise its direct
-// child repos (level 1, non-recursive). Never recurses into a repo.
+/** Find the enclosing working tree, or only direct child working trees outside a repo. */
 export async function findRepos(path: string): Promise<string[]> {
-  if (await isGitRepo(path)) return [path];
+  const root = await repoRoot(path);
+  if (root) return [root];
 
   const entries = await readdir(path, { withFileTypes: true }).catch(() => null);
   if (!entries) return [];
 
   const dirs = entries.filter((entry) => entry.isDirectory() && entry.name !== "node_modules");
-  const repos = await Promise.all(
-    dirs.map(async (entry) => {
-      const dir = join(path, entry.name);
-      return (await isGitRepo(dir)) ? dir : null;
-    }),
-  );
+  const repos = await Promise.all(dirs.map((entry) => repoRoot(join(path, entry.name))));
 
   return repos.filter((dir): dir is string => dir !== null).sort();
 }
 
-// A main working tree has `.git` as a directory; a linked worktree has it as a
-// file, so requiring a directory excludes worktrees that live under the parent.
-async function isGitRepo(dir: string): Promise<boolean> {
-  const entries = await readdir(dir, { withFileTypes: true }).catch(() => null);
-  return entries?.some((entry) => entry.name === ".git" && entry.isDirectory()) ?? false;
-}
-
-export async function fetchPrune(repo: string): Promise<void> {
-  await git(["fetch", "--prune"], repo);
-}
-
-export async function defaultBranch(repo: string): Promise<string | null> {
-  const output = await tryGit(
-    ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
-    repo,
-  );
-  return output === null ? null : parseDefaultBranch(output);
-}
-
-export async function currentBranchAt(repo: string): Promise<string | null> {
-  const output = await tryGit(["symbolic-ref", "--quiet", "--short", "HEAD"], repo);
-  return output === null ? null : output.trim();
-}
-
-export async function localBranches(repo: string): Promise<string[]> {
-  return parseBranches(await git(["branch", `--format=${BRANCH_FORMAT}`], repo));
-}
-
-export async function branchExists(repo: string, branch: string): Promise<boolean> {
-  const local = await tryGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], repo);
-  if (local !== null) return true;
-  const remote = await tryGit(
-    ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`],
-    repo,
-  );
-  return remote !== null;
-}
-
-export async function listWorktrees(repo: string): Promise<Worktree[]> {
-  return parseWorktrees(await git(["worktree", "list", "--porcelain"], repo));
-}
-
-export async function removeWorktree(repo: string, path: string): Promise<void> {
-  await git(["worktree", "remove", "--force", path], repo);
-}
-
-export async function switchBranch(repo: string, branch: string): Promise<void> {
-  await git(["switch", branch], repo);
-}
-
-export async function deleteBranch(repo: string, branch: string): Promise<void> {
-  await git(["branch", "-D", branch], repo);
-}
-
-export async function pull(repo: string): Promise<void> {
-  await git(["pull"], repo);
+async function repoRoot(dir: string): Promise<string | null> {
+  return (await tryGit(["rev-parse", "--show-toplevel"], dir))?.trim() ?? null;
 }

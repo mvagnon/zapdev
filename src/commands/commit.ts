@@ -1,3 +1,5 @@
+import { basename } from "node:path";
+
 import { defineCommand } from "citty";
 import {
   cancel,
@@ -18,6 +20,7 @@ import {
   commit as gitCommit,
   currentBranch,
   fetchRemote,
+  findRepos,
   getStagedDiff,
   hasUpstream,
   pullMerge,
@@ -32,15 +35,17 @@ import { generateCommitMessage } from "../lib/llm";
 import { COMMIT_TYPES } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 
-type CommitAction = "commit" | "edit" | "cancel";
+type CommitDraft = { repo: string; message: string };
+type CommitAction = "all" | "cancel" | { action: "commit" | "edit"; draft: CommitDraft };
 type SyncStrategy = "rebase" | "merge";
 type SyncAction = SyncStrategy | "quit";
 
+/** Commit the current repository or review direct child repositories together. */
 export const commitCommand = defineCommand({
   meta: {
     name: "commit",
     description:
-      "Stage all changes and commit with an LLM-generated Conventional Commits message.",
+      "Generate and review commit messages for the current repo or direct child repos.",
   },
   args: {
     url: {
@@ -125,176 +130,195 @@ export const commitCommand = defineCommand({
 
     if (interactive) intro("zapdev commit");
 
-    if (!args.staged) await stageAll();
-    const diff = await getStagedDiff();
-    if (!diff.trim()) {
-      log.warn("Nothing to commit.");
+    const repos = await findRepos(process.cwd());
+    if (repos.length === 0) {
+      log.warn("No git repository found here or in direct children.");
       if (interactive) outro("Nothing to do.");
       return;
     }
 
+    let scan: boolean;
     try {
-      if (await hasGitleaks()) {
-        const scanLoader = interactive ? spinner() : undefined;
-        scanLoader?.start("Scanning staged changes with Gitleaks");
-        try {
-          await scanStagedChanges();
-          scanLoader?.stop("No leaks found");
-        } catch (error) {
-          scanLoader?.error("Gitleaks check failed");
-          throw error;
-        }
-      } else {
-        log.info("Gitleaks not found, skipping secret scan.");
-      }
+      scan = await hasGitleaks();
     } catch (error) {
       log.error(`Gitleaks check failed: ${errorMessage(error)}`);
       process.exitCode = 1;
       return;
     }
+    if (!scan) log.info("Gitleaks not found, skipping secret scan.");
 
     const loader = interactive ? spinner() : undefined;
-    loader?.start("Generating commit message");
+    loader?.start("Preparing repositories and generating commit messages in parallel");
+    const results = await Promise.allSettled(repos.map(async (repo) => {
+      if (!args.staged) await stageAll(repo);
+      const diff = await getStagedDiff(repo);
+      if (!diff.trim()) return null;
+      if (scan) await scanStagedChanges(repo);
+      const message = await generateCommitMessage(diff, config, type);
+      if (!message) throw new Error("The model returned an empty message.");
+      return { repo, message };
+    }));
+    loader?.stop("Repositories prepared");
 
-    let message: string;
-    try {
-      message = await generateCommitMessage(diff, config, type);
-    } catch (error) {
-      loader?.error("Generation failed");
-      log.error(`Generation failed: ${errorMessage(error)}`);
-      process.exitCode = 1;
-      return;
-    }
-
-    if (!message) {
-      loader?.error("Generation failed");
-      log.error("Generation failed: the model returned an empty message.");
-      process.exitCode = 1;
-      return;
-    }
-
-    if (loader) loader.stop(message);
-    else log.message(message);
-
-    let finalMessage = message;
-
-    if (interactive && !args.yes) {
-      const action = await select<CommitAction>({
-        message: "Action",
-        initialValue: "commit",
-        options: [
-          { value: "commit", label: "Commit" },
-          { value: "edit", label: "Edit message" },
-          { value: "cancel", label: "Cancel" },
-        ],
-      });
-
-      if (isCancel(action) || action === "cancel") {
-        cancel("Cancelled (changes left staged).");
-        return;
-      }
-
-      if (action === "edit") {
-        const edited = await text({
-          message: "Edit message",
-          initialValue: message,
-        });
-        if (isCancel(edited)) {
-          cancel("Cancelled (changes left staged).");
-          return;
-        }
-        finalMessage = edited.trim();
-        if (!finalMessage) {
-          cancel("Empty message, cancelled.");
-          return;
-        }
+    const drafts: CommitDraft[] = [];
+    for (const [index, result] of results.entries()) {
+      if (result.status === "rejected") {
+        log.error(`${basename(repos[index]!)}: ${errorMessage(result.reason)}`);
+        process.exitCode = 1;
+      } else if (result.value) {
+        drafts.push(result.value);
+      } else {
+        log.info(`${basename(repos[index]!)}: nothing to commit.`);
       }
     }
 
-    await gitCommit(finalMessage);
-    if (interactive) log.success(`Committed: ${finalMessage}`);
+    if (drafts.length === 0) {
+      if (interactive) outro("No commits prepared.");
+      return;
+    }
+
+    const selected = await reviewMessages(drafts, interactive && !args.yes);
+    if (!selected) {
+      cancel("Cancelled (changes left staged).");
+      return;
+    }
+
+    const committed: CommitDraft[] = [];
+    for (const draft of selected) {
+      try {
+        await gitCommit(draft.repo, draft.message);
+        committed.push(draft);
+        log.success(`${basename(draft.repo)}: committed ${draft.message}`);
+      } catch (error) {
+        log.error(`${basename(draft.repo)}: commit failed: ${errorMessage(error)}`);
+        process.exitCode = 1;
+      }
+    }
+    if (committed.length === 0) return;
 
     let shouldPush = Boolean(args.push);
     if (!shouldPush && interactive && !args.yes) {
-      const answer = await confirm({ message: "Push?", initialValue: false });
+      const answer = await confirm({
+        message: `Push ${committed.map(({ repo }) => basename(repo)).join(", ")}?`,
+        initialValue: false,
+      });
       if (isCancel(answer)) {
-        if (interactive) outro("Committed. Not pushed.");
+        outro("Committed. Not pushed.");
         return;
       }
       shouldPush = answer;
     }
 
     if (shouldPush) {
-      const pushed = await pushOptimistic(
-        interactive,
-        interactive && !args.yes,
-        syncStrategy,
-      );
-      if (!pushed) {
-        process.exitCode = 1;
-        return;
+      for (const { repo } of committed) {
+        try {
+          const pushed = await pushOptimistic(
+            repo,
+            interactive,
+            interactive && !args.yes,
+            syncStrategy,
+          );
+          if (!pushed) process.exitCode = 1;
+        } catch (error) {
+          log.error(`${basename(repo)}: push failed: ${errorMessage(error)}`);
+          process.exitCode = 1;
+        }
       }
     }
 
-    if (interactive) outro("Done.");
+    if (interactive) outro(process.exitCode ? "Finished with errors." : "Done.");
   },
 });
 
+async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean): Promise<CommitDraft[] | null> {
+  while (true) {
+    for (const draft of drafts) log.message(`${basename(draft.repo)}: ${draft.message}`);
+    if (!canPrompt) return drafts;
+
+    const action = await select<CommitAction>({
+      message: "Action",
+      initialValue: "all",
+      options: [
+        { value: "all", label: drafts.length > 1 ? "Commit all" : "Commit" },
+        ...(drafts.length > 1 ? drafts.map((draft) => ({
+          value: { action: "commit" as const, draft },
+          label: `Commit only "${basename(draft.repo)}"`,
+        })) : []),
+        ...drafts.map((draft) => ({
+          value: { action: "edit" as const, draft },
+          label: `Edit message for "${basename(draft.repo)}"`,
+        })),
+        { value: "cancel", label: "Cancel" },
+      ],
+    });
+    if (isCancel(action) || action === "cancel") return null;
+    if (action === "all") return drafts;
+    if (action.action === "commit") return [action.draft];
+
+    const edited = await text({
+      message: `Edit message for "${basename(action.draft.repo)}"`,
+      initialValue: action.draft.message,
+      validate: (value) => value?.trim() ? undefined : "Message cannot be empty.",
+    });
+    if (isCancel(edited)) return null;
+    action.draft.message = edited.trim();
+  }
+}
+
 async function syncWithUpstream(
+  repo: string,
   strategy: SyncStrategy,
   interactive: boolean,
 ): Promise<boolean> {
   const loader = interactive ? spinner() : undefined;
   const label = strategy === "rebase" ? "Rebase" : "Merge";
-  loader?.start(`Pulling --${strategy === "rebase" ? "rebase" : "no-rebase"}`);
+  loader?.start(`${basename(repo)}: pulling --${strategy === "rebase" ? "rebase" : "no-rebase"}`);
   try {
-    await (strategy === "rebase" ? pullRebase() : pullMerge());
+    await (strategy === "rebase" ? pullRebase(repo) : pullMerge(repo));
     loader?.stop(strategy === "rebase" ? "✓ Rebased on upstream" : "✓ Merged upstream");
     return true;
   } catch (error) {
     loader?.error(`${label} failed`);
-    log.error(`${label} failed (resolve conflicts, then push): ${errorMessage(error)}`);
+    log.error(`${basename(repo)}: ${label} failed (resolve conflicts, then push): ${errorMessage(error)}`);
     return false;
   }
 }
 
-// Pushes without a preliminary fetch, so the common case stays a single round-trip.
-// On failure, diagnoses "behind upstream" by fetching and comparing (only on this
-// rare path) rather than parsing stderr. A behind rejection is recovered
-// with the selected strategy, then retry the push once.
+/** Push optimistically, recovering a behind-upstream rejection once. */
 async function pushOptimistic(
+  repo: string,
   interactive: boolean,
   canPrompt: boolean,
   strategy?: SyncStrategy,
 ): Promise<boolean> {
-  const [upstream, branch] = await Promise.all([hasUpstream(), currentBranch()]);
-  const doPush = () => (upstream ? push() : pushSetUpstream(branch));
+  const [upstream, branch] = await Promise.all([hasUpstream(repo), currentBranch(repo)]);
+  const doPush = () => (upstream ? push(repo) : pushSetUpstream(repo, branch));
 
-  const first = await tryPush(interactive, doPush);
+  const first = await tryPush(repo, interactive, doPush);
   if (first.ok) return true;
 
-  if (upstream && (await isBehind(interactive))) {
-    const syncStrategy = strategy ?? (await chooseSyncStrategy(canPrompt));
-    if (!syncStrategy || !(await syncWithUpstream(syncStrategy, interactive))) return false;
+  if (upstream && (await isBehind(repo, interactive))) {
+    const syncStrategy = strategy ?? (await chooseSyncStrategy(repo, canPrompt));
+    if (!syncStrategy || !(await syncWithUpstream(repo, syncStrategy, interactive))) return false;
 
-    const retry = await tryPush(interactive, doPush);
+    const retry = await tryPush(repo, interactive, doPush);
     if (retry.ok) return true;
-    log.error(`Push failed: ${errorMessage(retry.error)}`);
+    log.error(`${basename(repo)}: push failed: ${errorMessage(retry.error)}`);
     return false;
   }
 
-  log.error(`Push failed: ${errorMessage(first.error)}`);
+  log.error(`${basename(repo)}: push failed: ${errorMessage(first.error)}`);
   return false;
 }
 
-async function chooseSyncStrategy(interactive: boolean): Promise<SyncStrategy | null> {
+async function chooseSyncStrategy(repo: string, interactive: boolean): Promise<SyncStrategy | null> {
   if (!interactive) {
-    log.error("Branch is behind upstream. Re-run with --rebase or --merge.");
+    log.error(`${basename(repo)}: branch is behind upstream. Re-run with --rebase or --merge.`);
     return null;
   }
 
   const action = await select<SyncAction>({
-    message: "Branch is behind upstream. How should zapdev sync it?",
+    message: `${basename(repo)}: branch is behind upstream. How should zapdev sync it?`,
     options: [
       { value: "rebase", label: "Rebase" },
       { value: "merge", label: "Merge" },
@@ -312,9 +336,9 @@ async function chooseSyncStrategy(interactive: boolean): Promise<SyncStrategy | 
 
 type PushResult = { ok: true } | { ok: false; error: unknown };
 
-async function tryPush(interactive: boolean, doPush: () => Promise<void>): Promise<PushResult> {
+async function tryPush(repo: string, interactive: boolean, doPush: () => Promise<void>): Promise<PushResult> {
   const loader = interactive ? spinner() : undefined;
-  loader?.start("Pushing");
+  loader?.start(`${basename(repo)}: pushing`);
   try {
     await doPush();
     loader?.stop("✓ Pushed");
@@ -325,14 +349,13 @@ async function tryPush(interactive: boolean, doPush: () => Promise<void>): Promi
   }
 }
 
-// Fetches, then checks whether the branch trails its upstream. A failed fetch
-// (offline, auth) is treated as "not behind" so the original push error surfaces.
-async function isBehind(interactive: boolean): Promise<boolean> {
+/** Check the upstream after fetching; preserve the original push error if fetching fails. */
+async function isBehind(repo: string, interactive: boolean): Promise<boolean> {
   const loader = interactive ? spinner() : undefined;
-  loader?.start("Checking upstream");
+  loader?.start(`${basename(repo)}: checking upstream`);
   try {
-    await fetchRemote();
-    const behind = await behindCount();
+    await fetchRemote(repo);
+    const behind = await behindCount(repo);
     loader?.stop(
       behind > 0
         ? `Behind upstream by ${behind} commit${behind > 1 ? "s" : ""}`
@@ -341,7 +364,7 @@ async function isBehind(interactive: boolean): Promise<boolean> {
     return behind > 0;
   } catch (error) {
     loader?.error("Could not check upstream");
-    log.warn(`Could not check upstream: ${errorMessage(error)}`);
+    log.warn(`${basename(repo)}: could not check upstream: ${errorMessage(error)}`);
     return false;
   }
 }

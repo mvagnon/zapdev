@@ -1,27 +1,7 @@
-import { cancel, isCancel, select } from "@clack/prompts";
-import { defineCommand, runCommand, runMain, showUsage, type CommandDef } from "citty";
+import { defineCommand, runMain } from "citty";
 
 import pkg from "../package.json";
 import { commitCommand } from "./commands/commit";
-import { resetCommand } from "./commands/reset";
-
-const commands = {
-  commit: commitCommand,
-  reset: resetCommand,
-};
-
-type CommandName = keyof typeof commands;
-
-const MENU: Record<CommandName, string> = {
-  commit: "Stage all changes and commit with an AI-generated message",
-  reset: "Switch repos to a branch and delete the other branches and worktrees",
-};
-
-const menuOptions = (Object.keys(MENU) as CommandName[]).map((value) => ({
-  value,
-  label: value,
-  hint: MENU[value],
-}));
 
 const main = defineCommand({
   meta: {
@@ -29,25 +9,9 @@ const main = defineCommand({
     version: pkg.version,
     description: "Fast, precise git chores from your terminal.",
   },
-  subCommands: commands,
-  // citty runs this after a matched subcommand too, so bail out when one already ran.
-  async run({ args, cmd }) {
-    const selected = args._[0];
-    if (selected && selected in commands) return;
-
-    if (!(process.stdin.isTTY && process.stdout.isTTY)) {
-      await showUsage(cmd);
-      return;
-    }
-
-    const choice = await select({ message: "Which command?", options: menuOptions });
-    if (isCancel(choice)) {
-      cancel("Cancelled.");
-      return;
-    }
-
-    await runCommand(commands[choice] as CommandDef, { rawArgs: [] });
-  },
+  args: commitCommand.args,
+  subCommands: { commit: commitCommand },
+  default: "commit",
 });
 
 await runMain(main);

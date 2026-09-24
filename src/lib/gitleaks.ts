@@ -12,8 +12,12 @@ export async function hasGitleaks(): Promise<boolean> {
   }
 }
 
-export async function scanStagedChanges(): Promise<void> {
-  const result = await x("gitleaks", ["git", "--staged"], { nodePath: false });
+/** Scan the given repository's staged changes before sending them to the LLM. */
+export async function scanStagedChanges(repo: string): Promise<void> {
+  const result = await x("gitleaks", ["git", "--staged"], {
+    nodePath: false,
+    nodeOptions: { cwd: repo },
+  });
   if (result.exitCode === 0) return;
 
   const output = result.stderr.trim() || result.stdout.trim();
