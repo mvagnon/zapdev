@@ -120,7 +120,7 @@ zapdev commit -t feat      # force the type
 zapdev commit --staged     # leave unstaged changes untouched
 ```
 
-Before contacting the LLM endpoint, zapdev runs `gitleaks git --staged` in each changed repository when Gitleaks is installed. A failed scan skips that repository without sending its diff; when Gitleaks is absent, the scan is skipped. The staged diff is sent to the configured endpoint, which may be remote.
+Before contacting the LLM endpoint, zapdev runs `gitleaks git --staged --verbose` in each changed repository when Gitleaks is installed. A failed scan skips that repository without sending its diff; when Gitleaks is absent, the scan is skipped. The staged diff is sent to the configured endpoint, which may be remote.
 
 Failures are reported per repository while the others continue. Any failure produces a nonzero exit code.
 
