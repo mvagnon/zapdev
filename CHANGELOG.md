@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/mvagnon/zapdev/compare/v1.0.0...v1.1.0) (2026-09-24)
+
+
+### Features
+
+* Improve commit generation flow for multi-repo support ([4c019dc](https://github.com/mvagnon/zapdev/commit/4c019dc97e671df0a34b04cf2ab0789e56c99a63))
+
 ## [1.0.0](https://github.com/mvagnon/zapdev/compare/v0.11.0...v1.0.0) (2026-09-10)
 
 
