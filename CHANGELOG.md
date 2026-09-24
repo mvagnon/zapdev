@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/mvagnon/zapdev/compare/v1.1.0...v1.1.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **gitleaks:** add verbose output during scan ([816dc43](https://github.com/mvagnon/zapdev/commit/816dc4335aa89c44eea18dfc13d329aa6966a1d4))
+
 ## [1.1.0](https://github.com/mvagnon/zapdev/compare/v1.0.0...v1.1.0) (2026-09-24)
 
 
