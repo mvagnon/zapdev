@@ -157,7 +157,7 @@ export const commitCommand = defineCommand({
       const { repo } = repository;
       const { branch, hasChanges } = await getRepoStatus(repo);
       repository.label = `${basename(repo)} (${branch})`;
-      repository.pendingLabel = hasChanges ? styleText("bold", repository.label) : repository.label;
+      repository.pendingLabel = hasChanges ? styleText(["bold", "underline"], repository.label) : repository.label;
       if (!args.staged) await stageAll(repo);
       const diff = await getStagedDiff(repo);
       if (!diff.trim()) return null;

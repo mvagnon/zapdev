@@ -128,7 +128,7 @@ it.each(["color", "pipe", "NO_COLOR"])("shows branches and highlights only pendi
 
   await runCommand(commitCommand, { rawArgs: ["--yes"] });
 
-  const label = output === "color" ? "\u001b[1mback (fix/api)\u001b[22m" : "back (fix/api)";
+  const label = output === "color" ? "\u001b[1m\u001b[4mback (fix/api)\u001b[24m\u001b[22m" : "back (fix/api)";
   expect(log.info).toHaveBeenCalledWith("front (main): nothing to commit.");
   expect(log.message).toHaveBeenCalledExactlyOnceWith(`${label}: fix: back`);
   expect(log.success).toHaveBeenCalledExactlyOnceWith("back (fix/api): committed fix: back");
