@@ -1,5 +1,9 @@
 # zapdev
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mvagnon/zapdev/main/.github/assets/preview.gif" alt="zapdev CLI demonstration">
+</p>
+
 ## Project Introduction
 
 **zapdev** is a lightweight TypeScript CLI that makes small, repetitive Git chores fast and precise.
