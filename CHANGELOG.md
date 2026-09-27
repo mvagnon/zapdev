@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/mvagnon/zapdev/compare/v1.1.1...v1.2.0) (2026-09-27)
+
+
+### Features
+
+* **cli:** Enhance unified review with branch information and bolding ([1d91ac6](https://github.com/mvagnon/zapdev/commit/1d91ac633c0d2907faaf5d3ef3fcfd6e5157e110))
+
 ## [1.1.1](https://github.com/mvagnon/zapdev/compare/v1.1.0...v1.1.1) (2026-09-24)
 
 
