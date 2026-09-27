@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/mvagnon/zapdev/compare/v1.2.0...v1.3.0) (2026-09-27)
+
+
+### Features
+
+* **ui:** enhance unified review display with underline ([4e585c4](https://github.com/mvagnon/zapdev/commit/4e585c4cec7af8d7849fe9166a655ef96b323215))
+
 ## [1.2.0](https://github.com/mvagnon/zapdev/compare/v1.1.1...v1.2.0) (2026-09-27)
 
 
