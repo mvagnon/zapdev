@@ -38,6 +38,16 @@ export async function currentBranch(repo: string): Promise<string> {
   return (await git(["symbolic-ref", "--short", "HEAD"], repo)).trim();
 }
 
+/** Read the display branch and pending changes, including untracked files. */
+export async function getRepoStatus(repo: string): Promise<{ branch: string; hasChanges: boolean }> {
+  const lines = (await git(["status", "--porcelain=v2", "--branch", "--untracked-files=normal"], repo)).trim().split("\n");
+  const branch = lines.find((line) => line.startsWith("# branch.head "))?.slice(14) ?? "HEAD";
+  return {
+    branch: branch === "(detached)" ? "detached HEAD" : branch,
+    hasChanges: lines.some((line) => !line.startsWith("#")),
+  };
+}
+
 /** Check whether the current branch tracks an upstream. */
 export async function hasUpstream(repo: string): Promise<boolean> {
   const result = await tryGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", UPSTREAM_REF], repo);

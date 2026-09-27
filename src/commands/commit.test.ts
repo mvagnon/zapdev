@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { WriteStream } from "node:tty";
 import { runCommand } from "citty";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -13,7 +14,7 @@ vi.mock("@clack/prompts", () => ({
   spinner: () => ({ start: vi.fn(), stop: vi.fn(), error: vi.fn() }),
 }));
 
-import { confirm, select, text } from "@clack/prompts";
+import { confirm, log, select, text } from "@clack/prompts";
 import * as git from "../lib/git";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
@@ -22,6 +23,7 @@ import { commitCommand } from "./commit";
 const repos = ["/repos/front", "/repos/back"];
 const stdinTTY = process.stdin.isTTY;
 const stdoutTTY = process.stdout.isTTY;
+const stdoutGetColorDepth = process.stdout.getColorDepth;
 const exitCode = process.exitCode;
 
 beforeEach(() => {
@@ -29,13 +31,17 @@ beforeEach(() => {
   vi.stubEnv("ZD_URL", "http://localhost:1234/v1/chat/completions");
   vi.stubEnv("ZD_MODEL", "test-model");
   vi.stubEnv("ZD_EFFORT", "low");
+  vi.stubEnv("NO_COLOR", "1");
+  vi.stubEnv("FORCE_COLOR", undefined);
   process.stdin.isTTY = true;
   process.stdout.isTTY = true;
+  process.stdout.getColorDepth = WriteStream.prototype.getColorDepth;
   process.exitCode = undefined;
   vi.mocked(git.findRepos).mockResolvedValue(repos);
   vi.mocked(git.getStagedDiff).mockImplementation(async (repo) => repo);
   vi.mocked(git.hasUpstream).mockResolvedValue(true);
   vi.mocked(git.currentBranch).mockResolvedValue("main");
+  vi.mocked(git.getRepoStatus).mockResolvedValue({ branch: "main", hasChanges: true });
   vi.mocked(hasGitleaks).mockResolvedValue(true);
   vi.mocked(generateCommitMessage).mockImplementation(async (diff) => `fix: ${basename(diff)}`);
   vi.mocked(confirm).mockResolvedValue(false);
@@ -45,6 +51,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   process.stdin.isTTY = stdinTTY;
   process.stdout.isTTY = stdoutTTY;
+  process.stdout.getColorDepth = stdoutGetColorDepth;
   process.exitCode = exitCode;
 });
 
@@ -99,7 +106,32 @@ it("edits one repo, then commits only that repo with its edited message", async 
   await runCommand(commitCommand, { rawArgs: [] });
 
   expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: edited back");
+  expect(select).toHaveBeenCalledWith(expect.objectContaining({
+    options: expect.arrayContaining([
+      expect.objectContaining({ label: 'Commit only "back (main)"' }),
+      expect.objectContaining({ label: 'Edit message for "back (main)"' }),
+    ]),
+  }));
+  expect(text).toHaveBeenCalledWith(expect.objectContaining({ message: 'Edit message for "back (main)"' }));
   expect(git.push).not.toHaveBeenCalled();
+});
+
+it.each(["color", "pipe", "NO_COLOR"])("shows branches and highlights only pending changes: %s", async (output) => {
+  vi.stubEnv("NO_COLOR", output === "NO_COLOR" ? "1" : undefined);
+  vi.stubEnv("NODE_DISABLE_COLORS", undefined);
+  vi.stubEnv("FORCE_COLOR", output === "color" ? "1" : undefined);
+  process.stdout.isTTY = output !== "pipe";
+  vi.mocked(git.getRepoStatus)
+    .mockResolvedValueOnce({ branch: "main", hasChanges: false })
+    .mockResolvedValueOnce({ branch: "fix/api", hasChanges: true });
+  vi.mocked(git.getStagedDiff).mockResolvedValueOnce("").mockResolvedValueOnce("back");
+
+  await runCommand(commitCommand, { rawArgs: ["--yes"] });
+
+  const label = output === "color" ? "\u001b[1mback (fix/api)\u001b[22m" : "back (fix/api)";
+  expect(log.info).toHaveBeenCalledWith("front (main): nothing to commit.");
+  expect(log.message).toHaveBeenCalledExactlyOnceWith(`${label}: fix: back`);
+  expect(log.success).toHaveBeenCalledExactlyOnceWith("back (fix/api): committed fix: back");
 });
 
 it("accepts all repos and asks once before pushing only the successful commits", async () => {
@@ -112,6 +144,7 @@ it("accepts all repos and asks once before pushing only the successful commits",
 
   expect(git.commit).toHaveBeenCalledTimes(2);
   expect(confirm).toHaveBeenCalledTimes(1);
+  expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ message: "Push back (main)?" }));
   expect(git.pushSetUpstream).toHaveBeenCalledExactlyOnceWith("/repos/back", "main");
   expect(process.exitCode).toBe(1);
 });

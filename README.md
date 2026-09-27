@@ -94,7 +94,7 @@ Stages all changes, scans them with Gitleaks when installed, generates Conventio
 
 - **Inside a Git repository:** uses that repository only, including when launched from a subdirectory. Does not inspect child repositories.
 - **Outside a Git repository:** processes only direct child repositories. No recursive search; `node_modules` is excluded.
-- **Unified review:** generates messages in parallel, then presents every message with its repository name.
+- **Unified review:** generates messages in parallel, then presents every message with its repository name and branch. Repositories with pending changes are shown in bold when terminal styling is enabled.
 - **Actions:** commit all, commit only a named repository, edit a named repository's message, or cancel. Editing returns to the review menu.
 
 Repositories with nothing to commit are skipped. Unselected or cancelled changes remain staged. Push confirmation is asked once for the successfully committed repositories.

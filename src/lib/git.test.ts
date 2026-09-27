@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it } from "vitest";
 
-import { findRepos, getStagedDiff, stageAll } from "./git";
+import { findRepos, getRepoStatus, getStagedDiff, stageAll } from "./git";
 
 const exec = promisify(execFile);
 let root: string;
@@ -71,4 +71,24 @@ it("stages and reads each repo independently without changing the process direct
   expect(diff).toContain("back change");
   expect(diff).not.toContain("front change");
   expect(process.cwd()).toBe(cwd);
+});
+
+it("reports branches and pending changes for unborn, staged, unstaged and detached states", async () => {
+  await initRepo(root);
+  await exec("git", ["symbolic-ref", "HEAD", "refs/heads/feature/status"], { cwd: root });
+  await expect(getRepoStatus(root)).resolves.toEqual({ branch: "feature/status", hasChanges: false });
+
+  const file = join(root, "file.txt");
+  await writeFile(file, "new file");
+  await expect(getRepoStatus(root)).resolves.toEqual({ branch: "feature/status", hasChanges: true });
+  await stageAll(root);
+  await expect(getRepoStatus(root)).resolves.toEqual({ branch: "feature/status", hasChanges: true });
+
+  await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "initial"], { cwd: root });
+  await expect(getRepoStatus(root)).resolves.toEqual({ branch: "feature/status", hasChanges: false });
+  await writeFile(file, "modified file");
+  await expect(getRepoStatus(root)).resolves.toEqual({ branch: "feature/status", hasChanges: true });
+
+  await exec("git", ["checkout", "--detach", "--quiet", "HEAD"], { cwd: root });
+  await expect(getRepoStatus(root)).resolves.toEqual({ branch: "detached HEAD", hasChanges: true });
 });
