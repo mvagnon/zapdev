@@ -4,6 +4,11 @@
   <img src="https://raw.githubusercontent.com/mvagnon/zapdev/main/.github/assets/preview.gif" alt="zapdev CLI demonstration">
 </p>
 
+---
+
+[![portfolio](https://img.shields.io/website?url=https%3A%2F%2Fmvagnon.dev&up_message=Visit&label=Portfolio&color=%23007fff)](https://mvagnon.dev)
+[![bymeacoffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-Support-yellow?logo=buymeacoffee)](https://buymeacoffee.com/mvagnon)
+
 ## Project Introduction
 
 **zapdev** is a lightweight TypeScript CLI that makes small, repetitive Git chores fast and precise.
@@ -32,10 +37,10 @@ flowchart LR
 
 ## Environment Variables
 
-| Variable | Required | Description |
-| -------- | -------- | ----------- |
-| `ZD_URL` | For `commit` | Complete HTTP(S) Chat Completions endpoint, including its path |
-| `ZD_MODEL` | For `commit` | Model identifier supported by the endpoint |
+| Variable    | Required     | Description                                                                                         |
+| ----------- | ------------ | --------------------------------------------------------------------------------------------------- |
+| `ZD_URL`    | For `commit` | Complete HTTP(S) Chat Completions endpoint, including its path                                      |
+| `ZD_MODEL`  | For `commit` | Model identifier supported by the endpoint                                                          |
 | `ZD_EFFORT` | For `commit` | Sent as `reasoning_effort`; use a value supported by your model, such as `low`, `medium`, or `high` |
 
 There are no defaults, automatic provider detection, or backup models. CLI flags override these variables. Legacy `OLLAMA_*` variables are no longer read.
@@ -110,8 +115,8 @@ zapdev commit
 | Flag                | Description                                                       |
 | ------------------- | ----------------------------------------------------------------- |
 | `--url <url>`       | Override the complete Chat Completions endpoint                   |
-| `--model <model>`   | Override the model                                               |
-| `--effort <effort>` | Override the reasoning effort                                    |
+| `--model <model>`   | Override the model                                                |
+| `--effort <effort>` | Override the reasoning effort                                     |
 | `-t, --type <type>` | Force the Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
 | `-p, --push`        | Push after committing without asking                              |
 | `-s, --staged`      | Commit only changes that are already staged                       |
