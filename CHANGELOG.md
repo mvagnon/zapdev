@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/mvagnon/zapdev/compare/v1.4.0...v1.5.0) (2026-10-04)
+
+
+### Features
+
+* **readme:** add timeout variable and improve llm section ([c9153d7](https://github.com/mvagnon/zapdev/commit/c9153d7d1e59d76d113141d3b6682ffb55d7e560))
+
 ## [1.4.0](https://github.com/mvagnon/zapdev/compare/v1.3.0...v1.4.0) (2026-10-04)
 
 
