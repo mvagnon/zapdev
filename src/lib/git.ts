@@ -1,12 +1,26 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
+import { Readable } from "node:stream";
 
 import { x } from "tinyexec";
 
+import { createHookReporter } from "./git-hooks";
+import type { HookReporter } from "../types/git";
+
 const UPSTREAM_REF = "@{upstream}";
 
-async function git(args: string[], cwd: string): Promise<string> {
-  const result = await x("git", args, { nodeOptions: { cwd } });
+async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<string> {
+  const child = x("git", args, {
+    nodeOptions: onHook
+      ? { cwd, env: { ...process.env, GIT_TRACE2_EVENT: "3" }, stdio: ["pipe", "pipe", "pipe", "pipe"] }
+      : { cwd },
+  });
+  const trace = child.process?.stdio[3];
+  if (onHook && trace instanceof Readable) {
+    createInterface({ input: trace }).on("line", createHookReporter(onHook));
+  }
+  const result = await child;
   if (result.exitCode !== 0) {
     throw new Error(result.stderr.trim() || `git ${args.join(" ")} failed`);
   }
@@ -29,8 +43,8 @@ export async function getStagedDiff(repo: string): Promise<string> {
 }
 
 /** Commit the staged changes in the given repository. */
-export async function commit(repo: string, message: string): Promise<void> {
-  await git(["commit", "-m", message], repo);
+export async function commit(repo: string, message: string, onHook?: HookReporter): Promise<void> {
+  await git(["commit", "-m", message], repo, onHook);
 }
 
 /** Resolve the current branch, failing for a detached HEAD. */
@@ -55,28 +69,28 @@ export async function hasUpstream(repo: string): Promise<boolean> {
 }
 
 /** Push the given repository's current branch. */
-export async function push(repo: string): Promise<void> {
-  await git(["push"], repo);
+export async function push(repo: string, onHook?: HookReporter): Promise<void> {
+  await git(["push"], repo, onHook);
 }
 
 /** Push a branch to origin and configure its upstream. */
-export async function pushSetUpstream(repo: string, branch: string): Promise<void> {
-  await git(["push", "-u", "origin", branch], repo);
+export async function pushSetUpstream(repo: string, branch: string, onHook?: HookReporter): Promise<void> {
+  await git(["push", "-u", "origin", branch], repo, onHook);
 }
 
 /** Rebase the current branch on its upstream. */
-export async function pullRebase(repo: string): Promise<void> {
-  await git(["pull", "--rebase"], repo);
+export async function pullRebase(repo: string, onHook?: HookReporter): Promise<void> {
+  await git(["pull", "--rebase"], repo, onHook);
 }
 
 /** Merge the upstream into the current branch. */
-export async function pullMerge(repo: string): Promise<void> {
-  await git(["pull", "--no-rebase", "--no-edit"], repo);
+export async function pullMerge(repo: string, onHook?: HookReporter): Promise<void> {
+  await git(["pull", "--no-rebase", "--no-edit"], repo, onHook);
 }
 
 /** Fetch the given repository's remote references. */
-export async function fetchRemote(repo: string): Promise<void> {
-  await git(["fetch"], repo);
+export async function fetchRemote(repo: string, onHook?: HookReporter): Promise<void> {
+  await git(["fetch"], repo, onHook);
 }
 
 /** Count upstream commits missing from HEAD using the last fetched state. */

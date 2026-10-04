@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it } from "vitest";
 
-import { findRepos, getRepoStatus, getStagedDiff, stageAll } from "./git";
+import { commit, findRepos, getRepoStatus, getStagedDiff, push, stageAll } from "./git";
+import type { HookEvent } from "../types/git";
 
 const exec = promisify(execFile);
 let root: string;
@@ -91,4 +93,79 @@ it("reports branches and pending changes for unborn, staged, unstaged and detach
 
   await exec("git", ["checkout", "--detach", "--quiet", "HEAD"], { cwd: root });
   await expect(getRepoStatus(root)).resolves.toEqual({ branch: "detached HEAD", hasChanges: true });
+});
+
+async function configureHooks(): Promise<string> {
+  await initRepo(root);
+  for (const [key, value] of [["user.name", "Test"], ["user.email", "test@example.com"], ["commit.gpgsign", "false"], ["core.hooksPath", "hooks"]] as const) {
+    await exec("git", ["config", key, value], { cwd: root });
+  }
+  await writeFile(join(root, "file.txt"), "change");
+  await stageAll(root);
+  const hooks = join(root, "hooks");
+  await mkdir(hooks);
+  return hooks;
+}
+
+it.each([0, 3])("observes live commit hooks and preserves their failure output (exit %s)", async (exitCode) => {
+  const hooks = await configureHooks();
+  const preCommit = join(hooks, "pre-commit");
+  await writeFile(preCommit, `#!/bin/sh
+git rev-parse --git-dir >/dev/null
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  test -f hook-observed && exit 0
+  sleep 0.05
+done
+echo 'Hook was not observed live' >&2
+exit 9
+`);
+  const commitMsg = join(hooks, "commit-msg");
+  await writeFile(commitMsg, `#!/bin/sh\necho 'commit-msg diagnostic' >&2\nexit ${exitCode}\n`);
+  await chmod(preCommit, 0o755);
+  await chmod(commitMsg, 0o755);
+  await writeFile(join(hooks, "prepare-commit-msg"), "#!/bin/sh\nexit 8\n", { mode: 0o644 });
+  const events: HookEvent[] = [];
+
+  const result = commit(root, "fix: hooks", (event) => {
+    events.push(event);
+    if (event.name === "pre-commit" && event.phase === "start") writeFileSync(join(root, "hook-observed"), "observed");
+  });
+  if (exitCode === 0) await result;
+  else await expect(result).rejects.toThrow("commit-msg diagnostic");
+
+  expect(events).toEqual([
+    { name: "pre-commit", phase: "start" },
+    { name: "pre-commit", phase: "exit", exitCode: 0 },
+    { name: "commit-msg", phase: "start" },
+    { name: "commit-msg", phase: "exit", exitCode },
+  ]);
+});
+
+it("does not report hooks disabled by Git", async () => {
+  const hooks = await configureHooks();
+  await writeFile(join(hooks, "pre-commit"), "#!/bin/sh\nexit 8\n", { mode: 0o755 });
+  await exec("git", ["config", "core.hooksPath", "/dev/null"], { cwd: root });
+  const events: HookEvent[] = [];
+
+  await commit(root, "fix: no hooks", (event) => events.push(event));
+
+  expect(events).toEqual([]);
+});
+
+it("reports an actual pre-push hook and its exit code", async () => {
+  const hooks = await configureHooks();
+  await commit(root, "fix: initial");
+  const remote = join(root, "remote.git");
+  await exec("git", ["init", "--quiet", "--bare", remote]);
+  await exec("git", ["remote", "add", "origin", remote], { cwd: root });
+  await exec("git", ["config", "push.default", "current"], { cwd: root });
+  await writeFile(join(hooks, "pre-push"), "#!/bin/sh\necho 'pre-push diagnostic' >&2\nexit 5\n", { mode: 0o755 });
+  const events: HookEvent[] = [];
+
+  await expect(push(root, (event) => events.push(event))).rejects.toThrow("pre-push diagnostic");
+
+  expect(events).toEqual([
+    { name: "pre-push", phase: "start" },
+    { name: "pre-push", phase: "exit", exitCode: 5 },
+  ]);
 });
