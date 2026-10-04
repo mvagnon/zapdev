@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/mvagnon/zapdev/compare/v1.5.0...v1.6.0) (2026-10-04)
+
+
+### Features
+
+* **tests:** improve error handling and logging in integration tests ([df66370](https://github.com/mvagnon/zapdev/commit/df663702404f8bd385afae3a79749fd66069388d))
+
 ## [1.5.0](https://github.com/mvagnon/zapdev/compare/v1.4.0...v1.5.0) (2026-10-04)
 
 
