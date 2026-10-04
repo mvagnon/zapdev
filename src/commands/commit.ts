@@ -31,7 +31,7 @@ import {
   pushSetUpstream,
   stageAll,
 } from "../lib/git";
-import { errorMessage } from "../lib/errors";
+import { errorMessage, GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import { COMMIT_TYPES } from "../types/commit";
@@ -201,7 +201,7 @@ export const commitCommand = defineCommand({
         committed.push(draft);
         log.success(`${draft.label}: committed ${draft.message}`);
       } catch (error) {
-        log.error(`${draft.pendingLabel}: commit failed: ${errorMessage(error)}`);
+        reportGitFailure(`${draft.pendingLabel}: commit failed`, error);
         process.exitCode = 1;
       }
     }
@@ -230,7 +230,7 @@ export const commitCommand = defineCommand({
           );
           if (!pushed) process.exitCode = 1;
         } catch (error) {
-          log.error(`${repository.label}: push failed: ${errorMessage(error)}`);
+          reportGitFailure(`${repository.label}: push failed`, error);
           process.exitCode = 1;
         }
       }
@@ -240,14 +240,21 @@ export const commitCommand = defineCommand({
   },
 });
 
+/** Report Git failures without repeating native diagnostics or hook failure statuses. */
+function reportGitFailure(message: string, error: unknown, level: "error" | "warn" = "error"): void {
+  if (error instanceof GitOutputError && error.hookFailureReported) return;
+  log[level](error instanceof GitOutputError ? message : `${message}: ${errorMessage(error)}`);
+}
+
 function reportHooks(label: string): HookReporter {
+  const options = { secondarySymbol: "" };
   return (event) => {
     const hook = `${label}: ${event.name}`;
     if (event.phase === "start") {
-      log.info(`${hook} running`);
+      log.step(styleText("bold", hook), options);
     } else {
-      if (event.exitCode === 0) log.success(`${hook} ✓`);
-      else log.error(`${hook} ✗ (exit ${event.exitCode})`);
+      if (event.exitCode === 0) log.success(`${hook}: completed`, options);
+      else log.error(`${hook}: failed (exit ${event.exitCode})`, options);
     }
   };
 }
@@ -298,7 +305,7 @@ async function syncWithUpstream(
     log.success(`${label}: ${strategy === "rebase" ? "rebased on upstream" : "merged upstream"}`);
     return true;
   } catch (error) {
-    log.error(`${label}: ${actionLabel} failed (resolve conflicts, then push): ${errorMessage(error)}`);
+    reportGitFailure(`${label}: ${actionLabel} failed (resolve conflicts, then push)`, error);
     return false;
   }
 }
@@ -322,11 +329,11 @@ async function pushOptimistic(
 
     const retry = await tryPush(repository, doPush);
     if (retry.ok) return true;
-    log.error(`${label}: push failed: ${errorMessage(retry.error)}`);
+    reportGitFailure(`${label}: push failed`, retry.error);
     return false;
   }
 
-  log.error(`${label}: push failed: ${errorMessage(first.error)}`);
+  reportGitFailure(`${label}: push failed`, first.error);
   return false;
 }
 
@@ -379,7 +386,7 @@ async function isBehind({ repo, label }: Repository): Promise<boolean> {
     }`);
     return behind > 0;
   } catch (error) {
-    log.warn(`${label}: could not check upstream: ${errorMessage(error)}`);
+    reportGitFailure(`${label}: could not check upstream`, error, "warn");
     return false;
   }
 }

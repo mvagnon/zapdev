@@ -10,17 +10,19 @@ vi.mock("@clack/prompts", () => ({
   cancel: vi.fn(), confirm: vi.fn(), intro: vi.fn(), outro: vi.fn(),
   select: vi.fn(), text: vi.fn(),
   isCancel: (value: unknown) => typeof value === "symbol",
-  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), message: vi.fn(), success: vi.fn() },
+  log: { info: vi.fn(), step: vi.fn(), warn: vi.fn(), error: vi.fn(), message: vi.fn(), success: vi.fn() },
   spinner: vi.fn(),
 }));
 
 import { confirm, log, select, spinner, text } from "@clack/prompts";
 import * as git from "../lib/git";
+import { GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import { commitCommand } from "./commit";
 
 const repos = ["/repos/front", "/repos/back"];
+const hookLogOptions = { secondarySymbol: "" };
 const stdinTTY = process.stdin.isTTY;
 const stdoutTTY = process.stdout.isTTY;
 const stdoutGetColorDepth = process.stdout.getColorDepth;
@@ -176,6 +178,53 @@ it("scopes push recovery to the rejected repository", async () => {
   ]);
 });
 
+it.each(["commit", "push", "fetch", "rebase", "merge", "retry"])("does not repeat native Git diagnostics during %s", async (operation) => {
+  vi.mocked(git.findRepos).mockResolvedValue([repos[0]!]);
+  const error = new GitOutputError("Native Git diagnostic");
+  if (operation === "commit") vi.mocked(git.commit).mockRejectedValueOnce(error);
+  else {
+    vi.mocked(git.push).mockRejectedValueOnce(operation === "push" ? error : new Error("Behind upstream"));
+    vi.mocked(git.behindCount).mockResolvedValue(operation === "push" ? 0 : 1);
+    if (operation === "fetch") vi.mocked(git.fetchRemote).mockRejectedValueOnce(error);
+    if (operation === "rebase") vi.mocked(git.pullRebase).mockRejectedValueOnce(error);
+    if (operation === "merge") vi.mocked(git.pullMerge).mockRejectedValueOnce(error);
+    if (operation === "retry") vi.mocked(git.push).mockRejectedValueOnce(error);
+  }
+
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push", operation === "merge" ? "--merge" : "--rebase"] });
+
+  const status = operation === "commit" ? "commit failed"
+    : operation === "fetch" ? "could not check upstream"
+    : operation === "rebase" || operation === "merge" ? `${operation === "rebase" ? "Rebase" : "Merge"} failed (resolve conflicts, then push)`
+    : "push failed";
+  expect(operation === "fetch" ? log.warn : log.error).toHaveBeenCalledWith(`front (main): ${status}`);
+  const messages = [...vi.mocked(log.error).mock.calls, ...vi.mocked(log.warn).mock.calls].flat();
+  expect(messages.join("\n")).not.toContain("Native Git diagnostic");
+  expect(process.exitCode).toBe(1);
+});
+
+it("does not report a commit failure twice after the hook has already reported it", async () => {
+  vi.mocked(git.commit).mockImplementationOnce(async (_repo, _message, onHook) => {
+    onHook!({ name: "commit-msg", phase: "exit", exitCode: 3 });
+    throw new GitOutputError("git commit failed", true);
+  });
+
+  await runCommand(commitCommand, { rawArgs: ["--yes"] });
+
+  expect(log.error).toHaveBeenCalledExactlyOnceWith("front (main): commit-msg: failed (exit 3)", hookLogOptions);
+  expect(git.commit).toHaveBeenCalledTimes(2);
+  expect(process.exitCode).toBe(1);
+});
+
+it("still reports explicit hook timeouts in an interactive terminal", async () => {
+  vi.mocked(git.commit).mockRejectedValueOnce(new Error("pre-commit hook timed out after 60 seconds"));
+
+  await runCommand(commitCommand, { rawArgs: ["--yes"] });
+
+  expect(log.error).toHaveBeenCalledExactlyOnceWith("front (main): commit failed: pre-commit hook timed out after 60 seconds");
+  expect(process.exitCode).toBe(1);
+});
+
 it.each(["empty", "error"])("skips a repo whose generation returns %s", async (failure) => {
   if (failure === "empty") vi.mocked(generateCommitMessage).mockResolvedValueOnce("");
   else vi.mocked(generateCommitMessage).mockRejectedValueOnce(new Error("LLM unavailable"));
@@ -208,15 +257,15 @@ it.each([true, false])("shows actual hook progress and results with TTY=%s", asy
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
 
-  expect(log.success).toHaveBeenCalledWith("front (main): pre-commit ✓");
-  expect(log.error).toHaveBeenCalledWith("front (main): commit-msg ✗ (exit 3)");
-  expect(log.success).toHaveBeenCalledWith("back (main): pre-push ✓");
+  expect(log.success).toHaveBeenCalledWith("front (main): pre-commit: completed", hookLogOptions);
+  expect(log.error).toHaveBeenCalledWith("front (main): commit-msg: failed (exit 3)", hookLogOptions);
+  expect(log.success).toHaveBeenCalledWith("back (main): pre-push: completed", hookLogOptions);
   expect(log.error).toHaveBeenCalledWith("front (main): commit failed: Invalid commit message");
   expect(process.exitCode).toBe(1);
   expect(spinner).toHaveBeenCalledTimes(interactive ? 1 : 0);
-  expect(log.info).toHaveBeenCalledWith("front (main): pre-commit running");
-  expect(log.info).toHaveBeenCalledWith("front (main): commit-msg running");
-  expect(log.info).toHaveBeenCalledWith("back (main): pre-push running");
+  expect(log.step).toHaveBeenCalledWith("front (main): pre-commit", hookLogOptions);
+  expect(log.step).toHaveBeenCalledWith("front (main): commit-msg", hookLogOptions);
+  expect(log.step).toHaveBeenCalledWith("back (main): pre-push", hookLogOptions);
 });
 
 it("rejects an invalid hook timeout before preparing repositories", async () => {
@@ -246,9 +295,9 @@ it.each(["rebase", "merge"])("observes hooks during fetch, %s and push retry", a
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--push", `--${strategy}`] });
 
-  expect(log.success).toHaveBeenCalledWith("front (main): reference-transaction ✓");
-  expect(log.success).toHaveBeenCalledWith(`front (main): ${strategy === "rebase" ? "pre-rebase" : "post-merge"} ✓`);
-  expect(log.success).toHaveBeenCalledWith("front (main): pre-push ✓");
+  expect(log.success).toHaveBeenCalledWith("front (main): reference-transaction: completed", hookLogOptions);
+  expect(log.success).toHaveBeenCalledWith(`front (main): ${strategy === "rebase" ? "pre-rebase" : "post-merge"}: completed`, hookLogOptions);
+  expect(log.success).toHaveBeenCalledWith("front (main): pre-push: completed", hookLogOptions);
   expect(git.push).toHaveBeenCalledTimes(2);
   expect(spinner).toHaveBeenCalledTimes(1);
 });

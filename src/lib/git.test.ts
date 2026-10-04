@@ -165,7 +165,7 @@ it("interrupts a hanging hook and its subprocesses using the configured deadline
   await stageAll(root);
 }, 2_000);
 
-it.skipIf(process.platform !== "darwin").each(["answer", "timeout"])("supports real terminal hook logs and prompts: %s", async (mode) => {
+it.skipIf(process.platform !== "darwin").each(["answer", "timeout", "failure", "silent-failure"])("supports real terminal hook logs and prompts: %s", async (mode) => {
   const hooks = await configureHooks();
   await writeFile(join(hooks, "pre-commit"), `#!/bin/sh
 test -t 1 && test -t 2 || exit 7
@@ -173,21 +173,33 @@ stty -echo </dev/tty
 printf 'HOOK_LOG\nContinue? [y/n] ' >/dev/tty
 read answer </dev/tty
 printf 'HOOK_ANSWER=%s\n' "$answer" >/dev/tty
-test "$answer" = y
+if test "$answer" != y; then
+  ${mode === "silent-failure" ? "" : "echo 'HOOK_DIAGNOSTIC' >&2"}
+  exit 3
+fi
 `, { mode: 0o755 });
   const program = `
 import { createJiti } from "jiti";
 import { execFileSync } from "node:child_process";
-const { commit, getStagedDiff } = await createJiti(import.meta.url).import(${JSON.stringify(new URL("./git.ts", import.meta.url).href)});
+const jiti = createJiti(import.meta.url);
+const { commit, getStagedDiff } = await jiti.import(${JSON.stringify(new URL("./git.ts", import.meta.url).href)});
+const { GitOutputError } = await jiti.import(${JSON.stringify(new URL("./errors.ts", import.meta.url).href)});
 const terminalState = () => execFileSync("stty", ["-g"], { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" });
 const initialState = terminalState();
 if (!(await getStagedDiff(${JSON.stringify(root)})).includes("change")) throw new Error("Diff was not captured");
 try {
-  await commit(${JSON.stringify(root)}, "fix: interactive");
+  await commit(${JSON.stringify(root)}, "fix: interactive", ${JSON.stringify(mode)} === "failure" ? (event) => {
+    if (event.phase === "exit" && event.exitCode !== 0) console.log("HOOK_FAILURE_STATUS");
+  } : undefined);
   console.log("INTERACTIVE_DONE");
 } catch (error) {
-  if (${JSON.stringify(mode)} !== "timeout" || !error.message.includes("timed out after 0.2 seconds")) throw error;
-  console.log("TIMEOUT_OK");
+  if (${JSON.stringify(mode)} === "timeout") {
+    if (error instanceof GitOutputError || !error.message.includes("timed out after 0.2 seconds")) throw error;
+    console.log("TIMEOUT_OK");
+  } else if (["failure", "silent-failure"].includes(${JSON.stringify(mode)})) {
+    if (!(error instanceof GitOutputError) || error.hookFailureReported !== (${JSON.stringify(mode)} === "failure")) throw error;
+    console.log("NATIVE_FAILURE_OK");
+  } else throw error;
 } finally {
   console.log("TERMINAL_DONE");
   if (terminalState() !== initialState) throw new Error("Terminal state was not restored");
@@ -200,9 +212,9 @@ try {
   let answered = false;
   terminal.process?.stdout?.on("data", (data: Buffer) => {
     output += data.toString();
-    if (mode === "answer" && !answered && output.includes("Continue? [y/n]")) {
+    if (mode !== "timeout" && !answered && output.includes("Continue? [y/n]")) {
       answered = true;
-      terminal.process?.stdin?.write("y\n");
+      terminal.process?.stdin?.write(mode === "answer" ? "y\n" : "n\n");
     }
     if (output.includes("TERMINAL_DONE")) terminal.process?.stdin?.end();
   });
@@ -210,8 +222,14 @@ try {
   expect(result.stderr).toBe("");
   expect(result.exitCode, result.stdout).toBe(0);
   expect(result.stdout).toContain("HOOK_LOG");
-  expect(result.stdout).toContain(mode === "answer" ? "HOOK_ANSWER=y" : "TIMEOUT_OK");
-  if (mode === "answer") expect(result.stdout).toContain("INTERACTIVE_DONE");
+  expect(result.stdout).toContain(mode === "answer" ? "HOOK_ANSWER=y" : mode === "timeout" ? "TIMEOUT_OK" : "NATIVE_FAILURE_OK");
+  if (mode === "failure") expect(result.stdout.match(/HOOK_DIAGNOSTIC/g)).toHaveLength(1);
+  if (mode === "silent-failure") expect(result.stdout).not.toContain("HOOK_DIAGNOSTIC");
+  if (mode === "answer") {
+    expect(result.stdout).toContain("INTERACTIVE_DONE");
+    expect(result.stdout).not.toContain("fix: interactive");
+    expect(result.stdout).not.toMatch(/\d+ files? changed/);
+  }
 }, 5_000);
 
 it("reports an actual pre-push hook and its exit code", async () => {

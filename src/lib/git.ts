@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 import { x } from "tinyexec";
 
 import { resolveHookTimeout } from "./config";
+import { GitOutputError } from "./errors";
 import { createHookReporter } from "./git-hooks";
 import type { HookReporter } from "../types/git";
 
@@ -27,7 +28,11 @@ async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<
     },
   });
   let timeoutError: Error | undefined;
-  const { report, close } = createHookReporter(onHook, (name) => {
+  let hookFailureReported = false;
+  const { report, close } = createHookReporter((event) => {
+    if (onHook && event.phase === "exit" && event.exitCode !== 0) hookFailureReported = true;
+    onHook?.(event);
+  }, (name) => {
     if (timeoutError || child.pid === undefined) return;
     timeoutError = new Error(`${name} hook timed out after ${timeout / 1_000} seconds`);
     try {
@@ -48,7 +53,9 @@ async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<
     const result = await child;
     if (timeoutError) throw timeoutError;
     if (result.exitCode !== 0) {
-      throw new Error(result.stderr.trim() || `git ${args.join(" ")} failed`);
+      const message = result.stderr.trim() || `git ${args.join(" ")} failed`;
+      if (interactive) throw new GitOutputError(message, hookFailureReported);
+      throw new Error(message);
     }
     return result.stdout;
   } finally {
@@ -96,7 +103,7 @@ export async function getStagedDiff(repo: string): Promise<string> {
 
 /** Commit the staged changes in the given repository. */
 export async function commit(repo: string, message: string, onHook?: HookReporter): Promise<void> {
-  await git(["commit", "-m", message], repo, onHook);
+  await git(["commit", "--quiet", "-m", message], repo, onHook);
 }
 
 /** Resolve the current branch, failing for a detached HEAD. */
@@ -122,27 +129,27 @@ export async function hasUpstream(repo: string): Promise<boolean> {
 
 /** Push the given repository's current branch. */
 export async function push(repo: string, onHook?: HookReporter): Promise<void> {
-  await git(["push"], repo, onHook);
+  await git(["push", "--quiet"], repo, onHook);
 }
 
 /** Push a branch to origin and configure its upstream. */
 export async function pushSetUpstream(repo: string, branch: string, onHook?: HookReporter): Promise<void> {
-  await git(["push", "-u", "origin", branch], repo, onHook);
+  await git(["push", "--quiet", "-u", "origin", branch], repo, onHook);
 }
 
 /** Rebase the current branch on its upstream. */
 export async function pullRebase(repo: string, onHook?: HookReporter): Promise<void> {
-  await git(["pull", "--rebase"], repo, onHook);
+  await git(["pull", "--quiet", "--rebase"], repo, onHook);
 }
 
 /** Merge the upstream into the current branch. */
 export async function pullMerge(repo: string, onHook?: HookReporter): Promise<void> {
-  await git(["pull", "--no-rebase", "--no-edit"], repo, onHook);
+  await git(["pull", "--quiet", "--no-rebase", "--no-edit"], repo, onHook);
 }
 
 /** Fetch the given repository's remote references. */
 export async function fetchRemote(repo: string, onHook?: HookReporter): Promise<void> {
-  await git(["fetch"], repo, onHook);
+  await git(["fetch", "--quiet"], repo, onHook);
 }
 
 /** Count upstream commits missing from HEAD using the last fetched state. */
