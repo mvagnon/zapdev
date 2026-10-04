@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/mvagnon/zapdev/compare/v1.3.0...v1.4.0) (2026-10-04)
+
+
+### Features
+
+* Add bun install instruction to README ([ac130cf](https://github.com/mvagnon/zapdev/commit/ac130cf3750edb12336407e6d92e92d53d7cfd78))
+
 ## [1.3.0](https://github.com/mvagnon/zapdev/compare/v1.2.0...v1.3.0) (2026-09-27)
 
 
