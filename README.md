@@ -64,6 +64,12 @@ Install zapdev globally for daily use:
 npm install -g zapdev
 ```
 
+or
+
+```bash
+bun install -g zapdev
+```
+
 Configure your endpoint and model before running `commit` (replace these example values):
 
 ```bash
