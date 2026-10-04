@@ -35,6 +35,7 @@ beforeEach(() => {
   vi.stubEnv("ZD_URL", "http://localhost:1234/v1/chat/completions");
   vi.stubEnv("ZD_MODEL", "test-model");
   vi.stubEnv("ZD_EFFORT", "low");
+  vi.stubEnv("ZD_HOOK_TIMEOUT", undefined);
   vi.stubEnv("NO_COLOR", "1");
   vi.stubEnv("FORCE_COLOR", undefined);
   process.stdin.isTTY = true;
@@ -212,15 +213,18 @@ it.each([true, false])("shows actual hook progress and results with TTY=%s", asy
   expect(log.success).toHaveBeenCalledWith("back (main): pre-push ✓");
   expect(log.error).toHaveBeenCalledWith("front (main): commit failed: Invalid commit message");
   expect(process.exitCode).toBe(1);
-  if (interactive) {
-    const messages = vi.mocked(spinner).mock.results.flatMap(({ value }) => vi.mocked(value.message).mock.calls.flat());
-    expect(messages).toContain("front (main): pre-commit running…");
-    expect(messages).toContain("front (main): commit-msg running…");
-    expect(messages).toContain("back (main): pre-push running…");
-  } else {
-    expect(spinner).not.toHaveBeenCalled();
-    expect(log.info).toHaveBeenCalledWith("front (main): pre-commit running…");
-  }
+  expect(spinner).toHaveBeenCalledTimes(interactive ? 1 : 0);
+  expect(log.info).toHaveBeenCalledWith("front (main): pre-commit running");
+  expect(log.info).toHaveBeenCalledWith("front (main): commit-msg running");
+  expect(log.info).toHaveBeenCalledWith("back (main): pre-push running");
+});
+
+it("rejects an invalid hook timeout before preparing repositories", async () => {
+  vi.stubEnv("ZD_HOOK_TIMEOUT", "invalid");
+  await runCommand(commitCommand, { rawArgs: ["--yes"] });
+  expect(log.error).toHaveBeenCalledWith(expect.stringContaining("ZD_HOOK_TIMEOUT"));
+  expect(git.findRepos).not.toHaveBeenCalled();
+  expect(process.exitCode).toBe(1);
 });
 
 it.each(["rebase", "merge"])("observes hooks during fetch, %s and push retry", async (strategy) => {
@@ -246,4 +250,5 @@ it.each(["rebase", "merge"])("observes hooks during fetch, %s and push retry", a
   expect(log.success).toHaveBeenCalledWith(`front (main): ${strategy === "rebase" ? "pre-rebase" : "post-merge"} ✓`);
   expect(log.success).toHaveBeenCalledWith("front (main): pre-push ✓");
   expect(git.push).toHaveBeenCalledTimes(2);
+  expect(spinner).toHaveBeenCalledTimes(1);
 });

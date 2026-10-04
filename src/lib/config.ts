@@ -1,5 +1,14 @@
 import type { ZapdevConfig } from "../types/config";
 
+/** Resolve the per-hook deadline in milliseconds from ZD_HOOK_TIMEOUT (seconds). */
+export function resolveHookTimeout(env: Record<string, string | undefined> = process.env): number {
+  const timeout = Number(env.ZD_HOOK_TIMEOUT ?? 60) * 1_000;
+  if (!Number.isFinite(timeout) || timeout < 1 || timeout > 2_147_483_647) {
+    throw new Error("ZD_HOOK_TIMEOUT must be a number of seconds between 0.001 and 2147483.647.");
+  }
+  return timeout;
+}
+
 /** Resolve required settings, with CLI overrides taking precedence over environment variables. */
 export function resolveConfig(
   env: Record<string, string | undefined> = process.env,

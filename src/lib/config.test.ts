@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveConfig } from "./config";
+import { resolveConfig, resolveHookTimeout } from "./config";
 
 const env = { ZD_URL: "http://localhost:1234/v1/chat/completions", ZD_MODEL: "my-model", ZD_EFFORT: "low" };
+
+it("defaults hook deadlines to 60 seconds and accepts a valid environment override", () => {
+  expect(resolveHookTimeout({})).toBe(60_000);
+  expect(resolveHookTimeout({ ZD_HOOK_TIMEOUT: " 120 " })).toBe(120_000);
+  expect(resolveHookTimeout({ ZD_HOOK_TIMEOUT: "0.05" })).toBe(50);
+  for (const value of ["", " ", "0", "-1", "invalid", "Infinity", "2147484", "0.0001"]) {
+    expect(() => resolveHookTimeout({ ZD_HOOK_TIMEOUT: value })).toThrow("ZD_HOOK_TIMEOUT");
+  }
+});
 
 describe("resolveConfig", () => {
   it("requires explicit configuration instead of defaults or legacy settings", () => {

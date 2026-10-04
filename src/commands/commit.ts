@@ -15,7 +15,7 @@ import {
 } from "@clack/prompts";
 
 import { normalizeCommitType } from "../lib/commit-message";
-import { resolveConfig } from "../lib/config";
+import { resolveConfig, resolveHookTimeout } from "../lib/config";
 import {
   behindCount,
   commit as gitCommit,
@@ -121,6 +121,7 @@ export const commitCommand = defineCommand({
 
     let config: ZapdevConfig;
     try {
+      resolveHookTimeout();
       config = resolveConfig(process.env, {
         url: args.url,
         model: args.model,
@@ -194,16 +195,12 @@ export const commitCommand = defineCommand({
 
     const committed: CommitDraft[] = [];
     for (const draft of selected) {
-      const loader = interactive ? spinner() : undefined;
-      const message = `${draft.label}: committing`;
-      loader?.start(message);
+      log.info(`${draft.label}: committing`);
       try {
-        await gitCommit(draft.repo, draft.message, reportHooks(draft.label, loader, message));
-        loader?.clear();
+        await gitCommit(draft.repo, draft.message, reportHooks(draft.label));
         committed.push(draft);
         log.success(`${draft.label}: committed ${draft.message}`);
       } catch (error) {
-        loader?.clear();
         log.error(`${draft.pendingLabel}: commit failed: ${errorMessage(error)}`);
         process.exitCode = 1;
       }
@@ -228,7 +225,6 @@ export const commitCommand = defineCommand({
         try {
           const pushed = await pushOptimistic(
             repository,
-            interactive,
             interactive && !args.yes,
             syncStrategy,
           );
@@ -244,17 +240,14 @@ export const commitCommand = defineCommand({
   },
 });
 
-function reportHooks(label: string, loader: ReturnType<typeof spinner> | undefined, message: string): HookReporter {
+function reportHooks(label: string): HookReporter {
   return (event) => {
     const hook = `${label}: ${event.name}`;
     if (event.phase === "start") {
-      if (loader) loader.message(`${hook} running…`);
-      else log.info(`${hook} running…`);
+      log.info(`${hook} running`);
     } else {
-      loader?.clear();
       if (event.exitCode === 0) log.success(`${hook} ✓`);
       else log.error(`${hook} ✗ (exit ${event.exitCode})`);
-      loader?.start(message);
     }
   };
 }
@@ -297,18 +290,14 @@ async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean): Promis
 async function syncWithUpstream(
   { repo, label }: Repository,
   strategy: SyncStrategy,
-  interactive: boolean,
 ): Promise<boolean> {
-  const loader = interactive ? spinner() : undefined;
   const actionLabel = strategy === "rebase" ? "Rebase" : "Merge";
-  const message = `${label}: pulling --${strategy === "rebase" ? "rebase" : "no-rebase"}`;
-  loader?.start(message);
+  log.info(`${label}: pulling --${strategy === "rebase" ? "rebase" : "no-rebase"}`);
   try {
-    await (strategy === "rebase" ? pullRebase : pullMerge)(repo, reportHooks(label, loader, message));
-    loader?.stop(strategy === "rebase" ? "✓ Rebased on upstream" : "✓ Merged upstream");
+    await (strategy === "rebase" ? pullRebase : pullMerge)(repo, reportHooks(label));
+    log.success(`${label}: ${strategy === "rebase" ? "rebased on upstream" : "merged upstream"}`);
     return true;
   } catch (error) {
-    loader?.error(`${actionLabel} failed`);
     log.error(`${label}: ${actionLabel} failed (resolve conflicts, then push): ${errorMessage(error)}`);
     return false;
   }
@@ -317,7 +306,6 @@ async function syncWithUpstream(
 /** Push optimistically, recovering a behind-upstream rejection once. */
 async function pushOptimistic(
   repository: Repository,
-  interactive: boolean,
   canPrompt: boolean,
   strategy?: SyncStrategy,
 ): Promise<boolean> {
@@ -325,14 +313,14 @@ async function pushOptimistic(
   const [upstream, branch] = await Promise.all([hasUpstream(repo), currentBranch(repo)]);
   const doPush = (onHook: HookReporter) => (upstream ? push(repo, onHook) : pushSetUpstream(repo, branch, onHook));
 
-  const first = await tryPush(repository, interactive, doPush);
+  const first = await tryPush(repository, doPush);
   if (first.ok) return true;
 
-  if (upstream && (await isBehind(repository, interactive))) {
+  if (upstream && (await isBehind(repository))) {
     const syncStrategy = strategy ?? (await chooseSyncStrategy(repository, canPrompt));
-    if (!syncStrategy || !(await syncWithUpstream(repository, syncStrategy, interactive))) return false;
+    if (!syncStrategy || !(await syncWithUpstream(repository, syncStrategy))) return false;
 
-    const retry = await tryPush(repository, interactive, doPush);
+    const retry = await tryPush(repository, doPush);
     if (retry.ok) return true;
     log.error(`${label}: push failed: ${errorMessage(retry.error)}`);
     return false;
@@ -367,36 +355,30 @@ async function chooseSyncStrategy({ label }: Repository, interactive: boolean): 
 
 type PushResult = { ok: true } | { ok: false; error: unknown };
 
-async function tryPush({ label }: Repository, interactive: boolean, doPush: (onHook: HookReporter) => Promise<void>): Promise<PushResult> {
-  const loader = interactive ? spinner() : undefined;
-  const message = `${label}: pushing`;
-  loader?.start(message);
+async function tryPush({ label }: Repository, doPush: (onHook: HookReporter) => Promise<void>): Promise<PushResult> {
+  log.info(`${label}: pushing`);
   try {
-    await doPush(reportHooks(label, loader, message));
-    loader?.stop("✓ Pushed");
+    await doPush(reportHooks(label));
+    log.success(`${label}: pushed`);
     return { ok: true };
   } catch (error) {
-    loader?.error("Push failed");
     return { ok: false, error };
   }
 }
 
 /** Check the upstream after fetching; preserve the original push error if fetching fails. */
-async function isBehind({ repo, label }: Repository, interactive: boolean): Promise<boolean> {
-  const loader = interactive ? spinner() : undefined;
-  const message = `${label}: checking upstream`;
-  loader?.start(message);
+async function isBehind({ repo, label }: Repository): Promise<boolean> {
+  log.info(`${label}: checking upstream`);
   try {
-    await fetchRemote(repo, reportHooks(label, loader, message));
+    await fetchRemote(repo, reportHooks(label));
     const behind = await behindCount(repo);
-    loader?.stop(
+    log.info(`${label}: ${
       behind > 0
         ? `Behind upstream by ${behind} commit${behind > 1 ? "s" : ""}`
-        : "Up to date with upstream",
-    );
+        : "Up to date with upstream"
+    }`);
     return behind > 0;
   } catch (error) {
-    loader?.error("Could not check upstream");
     log.warn(`${label}: could not check upstream: ${errorMessage(error)}`);
     return false;
   }

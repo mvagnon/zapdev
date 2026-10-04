@@ -37,13 +37,14 @@ flowchart LR
 
 ## Environment Variables
 
-| Variable    | Required     | Description                                                                                         |
-| ----------- | ------------ | --------------------------------------------------------------------------------------------------- |
-| `ZD_URL`    | For `commit` | Complete HTTP(S) Chat Completions endpoint, including its path                                      |
-| `ZD_MODEL`  | For `commit` | Model identifier supported by the endpoint                                                          |
-| `ZD_EFFORT` | For `commit` | Sent as `reasoning_effort`; use a value supported by your model, such as `low`, `medium`, or `high` |
+| Variable          | Required     | Description                                                                                         |
+| ----------------- | ------------ | --------------------------------------------------------------------------------------------------- |
+| `ZD_URL`          | For `commit` | Complete HTTP(S) Chat Completions endpoint, including its path                                      |
+| `ZD_MODEL`        | For `commit` | Model identifier supported by the endpoint                                                          |
+| `ZD_EFFORT`       | For `commit` | Sent as `reasoning_effort`; use a value supported by your model, such as `low`, `medium`, or `high` |
+| `ZD_HOOK_TIMEOUT` | No           | Deadline per Git hook in seconds (default: `60`); positive numbers from `0.001` to `2147483.647` |
 
-There are no defaults, automatic provider detection, or backup models. CLI flags override these variables. Legacy `OLLAMA_*` variables are no longer read.
+The LLM settings have no defaults, automatic provider detection, or backup models. CLI flags override these settings. Legacy `OLLAMA_*` variables are no longer read.
 
 Requests use the OpenAI Chat Completions format over plain `fetch`, without a provider SDK. No authentication headers are sent; use an endpoint that does not require them. The endpoint and model must support `reasoning_effort`.
 
@@ -138,6 +139,8 @@ zapdev commit --staged     # leave unstaged changes untouched
 Before contacting the LLM endpoint, zapdev runs `gitleaks git --staged --verbose` in each changed repository when Gitleaks is installed. A failed scan skips that repository without sending its diff; when Gitleaks is absent, the scan is skipped. The staged diff is sent to the configured endpoint, which may be remote.
 
 Failures are reported per repository while the others continue. Any failure produces a nonzero exit code.
+
+In a terminal, Git and its hooks display live logs and support native prompts, even with `--yes` (which only skips zapdev prompts). Git controls hook stdin; interactive hooks should read from the terminal, for example `/dev/tty`. Each hook has a 60-second deadline, including time spent answering prompts; override it with `ZD_HOOK_TIMEOUT=120 zapdev commit`.
 
 Pushing is optimistic, with no preliminary fetch. If the branch is behind upstream, `--rebase` runs `git pull --rebase`, while `--merge` runs `git pull --no-rebase --no-edit`; zapdev then retries once. Without either flag, interactive runs ask whether to rebase, merge, or quit. Runs using `--yes` or without a TTY must provide one of the flags.
 

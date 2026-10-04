@@ -4,7 +4,8 @@ import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { x } from "tinyexec";
 
 import { commit, findRepos, getRepoStatus, getStagedDiff, push, stageAll } from "./git";
 import type { HookEvent } from "../types/git";
@@ -13,10 +14,12 @@ const exec = promisify(execFile);
 let root: string;
 
 beforeEach(async () => {
+  vi.stubEnv("ZD_HOOK_TIMEOUT", undefined);
   root = await realpath(await mkdtemp(join(tmpdir(), "zapdev-git-")));
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -151,6 +154,65 @@ it("does not report hooks disabled by Git", async () => {
 
   expect(events).toEqual([]);
 });
+
+it("interrupts a hanging hook and its subprocesses using the configured deadline without a reporter", async () => {
+  const hooks = await configureHooks();
+  vi.stubEnv("ZD_HOOK_TIMEOUT", "0.05");
+  await writeFile(join(hooks, "pre-commit"), "#!/bin/sh\nsleep 30\n", { mode: 0o755 });
+
+  await expect(commit(root, "fix: timeout")).rejects.toThrow("pre-commit hook timed out after 0.05 seconds");
+  await expect(exec("git", ["rev-parse", "--verify", "HEAD"], { cwd: root })).rejects.toThrow();
+  await stageAll(root);
+}, 2_000);
+
+it.skipIf(process.platform !== "darwin").each(["answer", "timeout"])("supports real terminal hook logs and prompts: %s", async (mode) => {
+  const hooks = await configureHooks();
+  await writeFile(join(hooks, "pre-commit"), `#!/bin/sh
+test -t 1 && test -t 2 || exit 7
+stty -echo </dev/tty
+printf 'HOOK_LOG\nContinue? [y/n] ' >/dev/tty
+read answer </dev/tty
+printf 'HOOK_ANSWER=%s\n' "$answer" >/dev/tty
+test "$answer" = y
+`, { mode: 0o755 });
+  const program = `
+import { createJiti } from "jiti";
+import { execFileSync } from "node:child_process";
+const { commit, getStagedDiff } = await createJiti(import.meta.url).import(${JSON.stringify(new URL("./git.ts", import.meta.url).href)});
+const terminalState = () => execFileSync("stty", ["-g"], { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" });
+const initialState = terminalState();
+if (!(await getStagedDiff(${JSON.stringify(root)})).includes("change")) throw new Error("Diff was not captured");
+try {
+  await commit(${JSON.stringify(root)}, "fix: interactive");
+  console.log("INTERACTIVE_DONE");
+} catch (error) {
+  if (${JSON.stringify(mode)} !== "timeout" || !error.message.includes("timed out after 0.2 seconds")) throw error;
+  console.log("TIMEOUT_OK");
+} finally {
+  console.log("TERMINAL_DONE");
+  if (terminalState() !== initialState) throw new Error("Terminal state was not restored");
+}
+`;
+  const terminal = x("sh", ["-c", 'cat | script -q /dev/null "$@"', "sh", process.execPath, "--input-type=module", "-e", program], {
+    nodeOptions: { env: { ...process.env, ZD_HOOK_TIMEOUT: mode === "timeout" ? "0.2" : "60" } },
+  });
+  let output = "";
+  let answered = false;
+  terminal.process?.stdout?.on("data", (data: Buffer) => {
+    output += data.toString();
+    if (mode === "answer" && !answered && output.includes("Continue? [y/n]")) {
+      answered = true;
+      terminal.process?.stdin?.write("y\n");
+    }
+    if (output.includes("TERMINAL_DONE")) terminal.process?.stdin?.end();
+  });
+  const result = await terminal;
+  expect(result.stderr).toBe("");
+  expect(result.exitCode, result.stdout).toBe(0);
+  expect(result.stdout).toContain("HOOK_LOG");
+  expect(result.stdout).toContain(mode === "answer" ? "HOOK_ANSWER=y" : "TIMEOUT_OK");
+  if (mode === "answer") expect(result.stdout).toContain("INTERACTIVE_DONE");
+}, 5_000);
 
 it("reports an actual pre-push hook and its exit code", async () => {
   const hooks = await configureHooks();

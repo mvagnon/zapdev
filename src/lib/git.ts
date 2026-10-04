@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -5,26 +6,77 @@ import { Readable } from "node:stream";
 
 import { x } from "tinyexec";
 
+import { resolveHookTimeout } from "./config";
 import { createHookReporter } from "./git-hooks";
 import type { HookReporter } from "../types/git";
 
 const UPSTREAM_REF = "@{upstream}";
 
 async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<string> {
+  const timeout = resolveHookTimeout();
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY && ["commit", "push", "pull", "fetch"].includes(args[0] ?? ""));
+  const terminalState = interactive && process.platform !== "win32"
+    ? execFileSync("stty", ["-g"], { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim()
+    : undefined;
   const child = x("git", args, {
-    nodeOptions: onHook
-      ? { cwd, env: { ...process.env, GIT_TRACE2_EVENT: "3" }, stdio: ["pipe", "pipe", "pipe", "pipe"] }
-      : { cwd },
+    nodeOptions: {
+      cwd,
+      detached: !interactive && process.platform !== "win32",
+      env: { ...process.env, GIT_TRACE2_EVENT: "3" },
+      stdio: interactive ? ["inherit", "inherit", "inherit", "pipe"] : ["pipe", "pipe", "pipe", "pipe"],
+    },
   });
+  let timeoutError: Error | undefined;
+  const { report, close } = createHookReporter(onHook, (name) => {
+    if (timeoutError || child.pid === undefined) return;
+    timeoutError = new Error(`${name} hook timed out after ${timeout / 1_000} seconds`);
+    try {
+      if (process.platform === "win32") {
+        execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      } else if (interactive) {
+        killProcessTree(child.pid);
+      } else {
+        process.kill(-child.pid, "SIGKILL");
+      }
+    } catch {
+      child.kill("SIGKILL");
+    }
+  }, timeout);
   const trace = child.process?.stdio[3];
-  if (onHook && trace instanceof Readable) {
-    createInterface({ input: trace }).on("line", createHookReporter(onHook));
+  const reader = trace instanceof Readable ? createInterface({ input: trace }).on("line", report) : undefined;
+  try {
+    const result = await child;
+    if (timeoutError) throw timeoutError;
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || `git ${args.join(" ")} failed`);
+    }
+    return result.stdout;
+  } finally {
+    reader?.close();
+    close();
+    if (terminalState) execFileSync("stty", [terminalState], { stdio: ["inherit", "ignore", "ignore"] });
   }
-  const result = await child;
-  if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || `git ${args.join(" ")} failed`);
+}
+
+function killProcessTree(pid: number): void {
+  const children = new Map<number, number[]>();
+  const output = execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8" });
+  for (const line of output.trim().split("\n")) {
+    const [child, parent] = line.trim().split(/\s+/).map(Number);
+    if (child === undefined || parent === undefined) continue;
+    const siblings = children.get(parent) ?? [];
+    siblings.push(child);
+    children.set(parent, siblings);
   }
-  return result.stdout;
+  const pids = [pid];
+  for (const parent of pids) pids.push(...(children.get(parent) ?? []));
+  for (const child of pids.reverse()) {
+    try {
+      process.kill(child, "SIGKILL");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  }
 }
 
 async function tryGit(args: string[], cwd: string): Promise<string | null> {
