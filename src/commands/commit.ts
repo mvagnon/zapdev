@@ -18,6 +18,7 @@ import {
   commit as gitCommit,
   currentBranch,
   findRepos,
+  getPushRemote,
   getUpstreamRemote,
   getRepoStatus,
   getStagedDiff,
@@ -98,7 +99,7 @@ export const commitCommand = defineCommand({
         effort: args.effort,
       });
     } catch (error) {
-      log.error(errorMessage(error));
+      log.error(errorMessage(error), { spacing: 0 });
       process.exitCode = 1;
       return;
     }
@@ -134,7 +135,7 @@ export const commitCommand = defineCommand({
           return results;
         });
         for (const result of pulls) {
-          if (result.status === "fulfilled" && result.value) log.warn(result.value);
+          if (result.status === "fulfilled" && result.value) log.warn(result.value, { spacing: 0 });
         }
       }
 
@@ -160,13 +161,13 @@ export const commitCommand = defineCommand({
         }
         return { results, scan };
       });
-      if (!scan) log.info("Gitleaks not found, skipping secret scan.");
+      if (!scan) log.info("Gitleaks not found, skipping secret scan.", { spacing: 0 });
 
       const drafts: CommitDraft[] = [];
       for (const [index, result] of results.entries()) {
         if (result.status === "fulfilled") {
           if (result.value) drafts.push(result.value);
-          else log.info(`${repositories[index]!.pendingLabel}: nothing to commit.`);
+          else log.info(`${repositories[index]!.pendingLabel}: nothing to commit.`, { spacing: 0 });
         }
       }
 
@@ -179,6 +180,7 @@ export const commitCommand = defineCommand({
       const toSend: Repository[] = [];
       let previousBranchInput = "";
       for (const draft of selected) {
+        let withGuide = true;
         const current = await currentBranch(draft.repo);
         if (/^(main|master|principal|dev|development)$/.test(current)) {
           if (!interactive) throw new Error("Committing on a protected branch requires a terminal to choose a branch. Changes remain staged.");
@@ -191,6 +193,7 @@ export const commitCommand = defineCommand({
             return;
           }
           previousBranchInput = answer.trim();
+          withGuide = Boolean(previousBranchInput);
           const branch = previousBranchInput || current;
           if (branch !== current) {
             await switchBranch(draft.repo, branch);
@@ -199,7 +202,7 @@ export const commitCommand = defineCommand({
           }
         }
         await runTask(`${draft.label}: commit`, `${draft.label}: committed ${draft.message}`, (onOutput) =>
-          gitCommit(draft.repo, draft.message, undefined, onOutput));
+          gitCommit(draft.repo, draft.message, undefined, onOutput), withGuide);
         toSend.push(draft);
       }
       if (toSend.length === 0) return;
@@ -208,9 +211,9 @@ export const commitCommand = defineCommand({
       const destinations: { repo: string; label: string; branch: string; remote: string }[] = [];
       for (const { repo, label } of toSend) {
         const branch = await currentBranch(repo);
-        const remote = await getUpstreamRemote(repo, branch);
+        const remote = await getPushRemote(repo, branch);
         if (remote) destinations.push({ repo, label, branch, remote });
-        else log.warn(`${label}: no configured upstream remote. Skipping push; commit remains local.`);
+        else log.warn(`${label}: no unambiguous push remote. Skipping push; commit remains local.`, { spacing: 0 });
       }
 
       let shouldPush = Boolean(args.push);
@@ -220,7 +223,7 @@ export const commitCommand = defineCommand({
           initialValue: false,
         });
         if (isCancel(answer)) {
-          outro("Committed. Not pushed.");
+          cancel("Committed. Not pushed.");
           return;
         }
         shouldPush = answer;
@@ -235,7 +238,7 @@ export const commitCommand = defineCommand({
 
       if (interactive) outro("Done.");
     } catch (error) {
-      log.error(errorMessage(error));
+      log.error(errorMessage(error), { spacing: 0 });
       process.exitCode = 1;
     }
   },
@@ -243,8 +246,8 @@ export const commitCommand = defineCommand({
 
 async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean): Promise<CommitDraft[] | null> {
   while (true) {
-    for (const { stats, pendingLabel, message } of drafts) {
-      log.message(`(${styleText("green", `+${stats.additions}`)} ${styleText("red", `-${stats.deletions}`)}) ${pendingLabel}: ${message}`);
+    for (const [index, { stats, pendingLabel, message }] of drafts.entries()) {
+      log.message(`(${styleText("green", `+${stats.additions}`)} ${styleText("red", `-${stats.deletions}`)}) ${pendingLabel}: ${message}`, { spacing: index === 0 ? 1 : 0 });
     }
     if (!canPrompt) return drafts;
 

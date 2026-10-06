@@ -44,13 +44,19 @@ it.each([true, false])("starts and stops once without reacting to Git output (TT
   expect(loader.clear).not.toHaveBeenCalled();
   expect(taskLog).not.toHaveBeenCalled();
   if (interactive) {
+    expect(spinner).toHaveBeenCalledExactlyOnceWith({ withGuide: true });
     expect(loader.start).toHaveBeenCalledExactlyOnceWith("repo: pull");
     expect(loader.stop).toHaveBeenCalledExactlyOnceWith("repo: pulled");
   } else {
     expect(spinner).not.toHaveBeenCalled();
     expect(log.info).toHaveBeenCalledExactlyOnceWith("repo: pull");
-    expect(log.success).toHaveBeenCalledExactlyOnceWith("repo: pulled");
+    expect(log.success).toHaveBeenCalledExactlyOnceWith("repo: pulled", { spacing: 0 });
   }
+});
+
+it("does not add another spacer when an empty prompt already left one", async () => {
+  await runTask("repo: commit", "repo: committed", async () => undefined, false);
+  expect(spinner).toHaveBeenCalledExactlyOnceWith({ withGuide: false });
 });
 
 it.each([true, false])("stops the spinner and propagates captured failure diagnostics (TTY=%s)", async (interactive) => {

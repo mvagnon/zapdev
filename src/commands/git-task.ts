@@ -3,14 +3,15 @@ import { log, spinner } from "@clack/prompts";
 import { errorMessage } from "../lib/errors";
 import type { GitOutputReporter } from "../types/git";
 
-/** Run a CLI step with one uninterrupted spinner and captured Git diagnostics. */
+/** Run a CLI step with captured Git diagnostics; disable its guide when a prompt already left a spacer. */
 export async function runTask<T>(
   title: string,
   successMessage: string,
   run: (onOutput: GitOutputReporter) => Promise<T>,
+  withGuide = true,
 ): Promise<T> {
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-  const loader = interactive ? spinner({ withGuide: false }) : undefined;
+  const loader = interactive ? spinner({ withGuide }) : undefined;
   const wasRaw = Boolean(process.stdin.isRaw);
   loader?.start(title);
   if (loader) {
@@ -20,7 +21,7 @@ export async function runTask<T>(
   try {
     const result = await run(() => undefined);
     if (loader) loader.stop(successMessage);
-    else log.success(successMessage);
+    else log.success(successMessage, { spacing: 0 });
     return result;
   } catch (error) {
     loader?.clear();

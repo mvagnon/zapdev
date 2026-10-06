@@ -149,15 +149,29 @@ export async function getRepoStatus(repo: string): Promise<{ branch: string; has
 
 /** Resolve the branch's upstream remote only when it is a configured named remote. */
 export async function getUpstreamRemote(repo: string, branch: string): Promise<string | null> {
-  const remotes = (await git(["remote"], repo)).trim().split("\n").filter(Boolean);
+  const remotes = await getRemotes(repo);
   const upstream = (await git(["for-each-ref", "--format=%(upstream:remotename)", `refs/heads/${branch}`], repo)).trim();
   return remotes.includes(upstream) ? upstream : null;
 }
 
-/** Push committed repository history without force or changes to local branches and upstreams. */
+/** Prefer the upstream remote for push, then origin or the only configured remote. */
+export async function getPushRemote(repo: string, branch: string): Promise<string | null> {
+  const upstream = await getUpstreamRemote(repo, branch);
+  if (upstream) return upstream;
+  const remotes = await getRemotes(repo);
+  return remotes.includes("origin") ? "origin" : remotes.length === 1 ? remotes[0]! : null;
+}
+
+async function getRemotes(repo: string): Promise<string[]> {
+  return (await git(["remote"], repo)).trim().split("\n").filter(Boolean);
+}
+
+/** Push without force, setting the current branch's upstream only when none exists. */
 export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter, onOutput?: GitOutputReporter): Promise<void> {
   await git(["check-ref-format", "--branch", branch], repo);
-  await git(["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook, onOutput);
+  const current = await currentBranch(repo);
+  const upstream = (await git(["for-each-ref", "--format=%(upstream)", `refs/heads/${current}`], repo)).trim();
+  await git(["push", ...(!upstream ? ["--set-upstream"] : []), "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook, onOutput);
 }
 
 /** Find the enclosing working tree, or only direct child working trees outside a repo. */

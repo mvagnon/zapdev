@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { x } from "tinyexec";
 
-import { commit, currentBranch, findRepos, getUpstreamRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, push, stageAll, switchBranch } from "./git";
+import { commit, currentBranch, findRepos, getPushRemote, getUpstreamRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, push, stageAll, switchBranch } from "./git";
 import type { HookEvent } from "../types/git";
 
 const exec = promisify(execFile);
@@ -318,6 +318,7 @@ it("reports an actual pre-push hook and its exit code", async () => {
     { name: "pre-push", phase: "start" },
     { name: "pre-push", phase: "exit", exitCode: 5 },
   ]);
+  await expect(getUpstreamRemote(root, branch.trim())).resolves.toBeNull();
 });
 
 it("pulls fast-forward updates without losing local changes and refuses divergent history", async () => {
@@ -363,6 +364,21 @@ it("allows pushing to main", async () => {
   expect(await git(["show", "main:file.txt"], remote)).toBe("change");
 });
 
+it("publishes a new local branch and sets its upstream on the first push", async () => {
+  await configureHooks();
+  await commit(root, "fix: initial");
+  const remote = join(root, ".git", "origin.git");
+  await exec("git", ["init", "--quiet", "--bare", remote]);
+  await git(["remote", "add", "origin", remote], root);
+  await switchBranch(root, "feature/new");
+
+  await push(root, "origin", "feature/new");
+
+  await expect(getUpstreamRemote(root, "feature/new")).resolves.toBe("origin");
+  expect((await git(["rev-parse", "--symbolic-full-name", "@{upstream}"], root)).trim()).toBe("refs/remotes/origin/feature/new");
+  expect(await git(["rev-parse", "feature/new"], remote)).toBe(await git(["rev-parse", "HEAD"], root));
+});
+
 it("pushes HEAD to a new destination without changing local branches or their upstream", async () => {
   await configureHooks();
   await commit(root, "fix: initial");
@@ -375,6 +391,7 @@ it("pushes HEAD to a new destination without changing local branches or their up
   await exec("git", ["checkout", "--quiet", "-b", "feature/input"], { cwd: root });
   await exec("git", ["push", "--quiet", "-u", "origin", "feature/input"], { cwd: root });
   await exec("git", ["checkout", "--quiet", "-b", "feature/current"], { cwd: root });
+  await git(["branch", "--set-upstream-to=origin/feature/input"], root);
   await writeFile(join(root, "file.txt"), "current branch change");
   await stageAll(root);
   await commit(root, "feat: current");
@@ -386,6 +403,7 @@ it("pushes HEAD to a new destination without changing local branches or their up
   expect(remote.stdout).toBe(local.stdout);
   const upstream = await exec("git", ["rev-parse", "--symbolic-full-name", "feature/input@{upstream}"], { cwd: root });
   expect(upstream.stdout.trim()).toBe("refs/remotes/origin/feature/input");
+  expect((await git(["rev-parse", "--symbolic-full-name", "@{upstream}"], root)).trim()).toBe("refs/remotes/origin/feature/input");
   await expect(exec("git", ["rev-parse", "--verify", "refs/heads/feature/destination"], { cwd: root })).rejects.toThrow();
   await expect(exec("git", ["rev-parse", "--verify", "feature/current"], { cwd: other })).rejects.toThrow();
 });
@@ -395,13 +413,19 @@ it.each(["", "--force", "invalid..branch", "main:other"])("rejects invalid push 
   await expect(push(root, "origin", branch)).rejects.toThrow();
 });
 
-it.each([{ remotes: [] }, { remotes: ["server"] }, { remotes: ["origin", "server"] }])("returns no remote without an upstream: $remotes", async ({ remotes }) => {
+it.each([
+  { remotes: [], pushRemote: null },
+  { remotes: ["server"], pushRemote: "server" },
+  { remotes: ["origin", "server"], pushRemote: "origin" },
+  { remotes: ["first", "second"], pushRemote: null },
+])("only falls back to an unambiguous remote for push: $remotes", async ({ remotes, pushRemote }) => {
   await configureHooks();
   await commit(root, "fix: initial");
   const branch = await currentBranch(root);
   for (const remote of remotes) await exec("git", ["remote", "add", remote, join(root, `${remote}.git`)], { cwd: root });
 
   await expect(getUpstreamRemote(root, branch)).resolves.toBeNull();
+  await expect(getPushRemote(root, branch)).resolves.toBe(pushRemote);
 });
 
 it("resolves the current branch's upstream remote even when its tracking ref is missing", async () => {
@@ -416,6 +440,7 @@ it("resolves the current branch's upstream remote even when its tracking ref is 
   await exec("git", ["config", "branch.feature/current.pushRemote", "origin"], { cwd: root });
 
   await expect(getUpstreamRemote(root, "feature/current")).resolves.toBe("team/server");
+  await expect(getPushRemote(root, "feature/current")).resolves.toBe("team/server");
 
   await exec("git", ["config", "branch.feature/current.remote", "."], { cwd: root });
   await expect(getUpstreamRemote(root, "feature/current")).resolves.toBeNull();
