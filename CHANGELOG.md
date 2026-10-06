@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/mvagnon/zapdev/compare/v1.16.0...v1.17.0) (2026-10-06)
+
+
+### Features
+
+* Improve parallel pull flow and logging in commit command ([3941842](https://github.com/mvagnon/zapdev/commit/394184214a4ec67a5cb3237a1329170b677b842f))
+
 ## [1.16.0](https://github.com/mvagnon/zapdev/compare/v1.15.0...v1.16.0) (2026-10-06)
 
 
