@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/mvagnon/zapdev/compare/v2.0.0...v2.1.0) (2026-10-06)
+
+
+### Features
+
+* Enhance parallel push handling and testing utilities ([6c61c5c](https://github.com/mvagnon/zapdev/commit/6c61c5ca96febfcc062b255e7842108d42a39cf5))
+
 ## [2.0.0](https://github.com/mvagnon/zapdev/compare/v1.18.0...v2.0.0) (2026-10-06)
 
 
