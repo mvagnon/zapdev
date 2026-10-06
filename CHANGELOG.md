@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.0](https://github.com/mvagnon/zapdev/compare/v2.1.1...v2.2.0) (2026-10-06)
+
+
+### Features
+
+* Implement context generation for commit tools ([9ee0681](https://github.com/mvagnon/zapdev/commit/9ee068125d448c5f2b2f9c20eb789a5f49244bc7))
+* Improve commit message generation and validation ([44397d5](https://github.com/mvagnon/zapdev/commit/44397d563ac499ca870ee4553b47c8393180a98e))
+
 ## [2.1.1](https://github.com/mvagnon/zapdev/compare/v2.1.0...v2.1.1) (2026-10-06)
 
 
