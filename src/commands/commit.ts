@@ -10,8 +10,6 @@ import {
   log,
   outro,
   select,
-  spinner,
-  taskLog,
   text,
 } from "@clack/prompts";
 
@@ -29,13 +27,13 @@ import {
   stageAll,
   switchBranch,
 } from "../lib/git";
-import { errorMessage, GitOutputError } from "../lib/errors";
+import { errorMessage } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import { COMMIT_TYPES } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 import type { DiffStats } from "../types/git";
-import { runGitTask } from "./git-task";
+import { runTask } from "./git-task";
 
 type Repository = { repo: string; label: string; pendingLabel: string };
 type CommitDraft = Repository & { message: string; stats: DiffStats };
@@ -107,98 +105,80 @@ export const commitCommand = defineCommand({
 
     if (interactive) intro("zapdev commit");
 
-    const repos = await findRepos(process.cwd());
-    if (repos.length === 0) {
-      log.warn("No git repository found here or in direct children.");
-      if (interactive) outro("Nothing to do.");
-      return;
-    }
-
-    const loader = interactive ? spinner() : undefined;
-    if (args.pull) {
-      loader?.start("Pulling repositories in parallel");
-      let pullLog: ReturnType<typeof taskLog> | undefined;
-      const pulls = await Promise.allSettled(repos.map(async (repo) => {
-        const label = basename(repo);
-        const hasChanges = args.staged
-          ? Boolean((await getStagedDiff(repo)).trim())
-          : (await getRepoStatus(repo)).hasChanges;
-        if (!hasChanges) return true;
-        const branch = await currentBranch(repo);
-        if (!await getUpstreamRemote(repo, branch)) {
-          return `${label}: no configured upstream remote. Skipping pull.`;
-        }
-        if (interactive) {
-          loader?.clear();
-          pullLog ??= taskLog({ title: "Pulling repositories in parallel", limit: 10, retainLog: true });
-        }
-        return runGitTask(label, "pull", `${label}: pulled`, (onHook, onOutput) =>
-          runGit(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, onHook, onOutput), pullLog?.group(label));
-      }));
-      loader?.clear();
-      const failed = pulls.some((result) => result.status === "rejected" || result.value === false);
-      if (failed) pullLog?.error("Pulling failed");
-      else pullLog?.success("Repositories pulled", { showLog: true });
-      for (const [index, result] of pulls.entries()) {
-        if (result.status === "rejected") reportGitFailure(`${basename(repos[index]!)}: pull failed`, result.reason);
-        else if (typeof result.value === "string") log.warn(result.value);
-      }
-      if (failed) {
-        process.exitCode = 1;
+    try {
+      const repos = await findRepos(process.cwd());
+      if (repos.length === 0) {
+        log.warn("No git repository found here or in direct children.");
+        if (interactive) outro("Nothing to do.");
         return;
       }
-    }
 
-    let scan: boolean;
-    try {
-      scan = await hasGitleaks();
-    } catch (error) {
-      log.error(`Gitleaks check failed: ${errorMessage(error)}`);
-      process.exitCode = 1;
-      return;
-    }
-    if (!scan) log.info("Gitleaks not found, skipping secret scan.");
-
-    loader?.start("Preparing repositories and generating commit messages in parallel");
-    const repositories: Repository[] = repos.map((repo) => ({ repo, label: basename(repo), pendingLabel: basename(repo) }));
-    const results = await Promise.allSettled(repositories.map(async (repository) => {
-      const { repo } = repository;
-      const { branch, hasChanges } = await getRepoStatus(repo);
-      repository.label = `${basename(repo)} (${branch})`;
-      repository.pendingLabel = hasChanges ? styleText("bold", repository.label) : repository.label;
-      if (!args.staged) await stageAll(repo);
-      const diff = await getStagedDiff(repo);
-      if (!diff.trim()) return null;
-      const stats = await getStagedDiffStats(repo);
-      if (scan) await scanStagedChanges(repo);
-      const message = await generateCommitMessage(diff, config, args.type);
-      if (!message) throw new Error("The model returned an empty message.");
-      return { ...repository, message, stats };
-    }));
-    loader?.stop("Repositories prepared");
-
-    const drafts: CommitDraft[] = [];
-    for (const [index, result] of results.entries()) {
-      if (result.status === "rejected") {
-        log.error(`${repositories[index]!.pendingLabel}: ${errorMessage(result.reason)}`);
-        process.exitCode = 1;
-      } else if (result.value) {
-        drafts.push(result.value);
-      } else {
-        log.info(`${repositories[index]!.pendingLabel}: nothing to commit.`);
+      if (args.pull) {
+        const pulls = await runTask("Pulling repositories in parallel", "Repositories pulled", async (onOutput) => {
+          const results = await Promise.allSettled(repos.map(async (repo) => {
+            const label = basename(repo);
+            const hasChanges = args.staged
+              ? Boolean((await getStagedDiff(repo)).trim())
+              : (await getRepoStatus(repo)).hasChanges;
+            if (!hasChanges) return null;
+            const branch = await currentBranch(repo);
+            if (!await getUpstreamRemote(repo, branch)) {
+              return `${label}: no configured upstream remote. Skipping pull.`;
+            }
+            await runGit(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, undefined, onOutput);
+            return null;
+          }));
+          for (const [index, result] of results.entries()) {
+            if (result.status === "rejected") throw new Error(`${basename(repos[index]!)}: ${errorMessage(result.reason)}`);
+          }
+          return results;
+        });
+        for (const result of pulls) {
+          if (result.status === "fulfilled" && result.value) log.warn(result.value);
+        }
       }
-    }
 
-    const selected = drafts.length ? await reviewMessages(drafts, interactive && !args.yes) : [];
-    if (!selected) {
-      cancel("Cancelled (changes left staged).");
-      return;
-    }
+      const repositories: Repository[] = repos.map((repo) => ({ repo, label: basename(repo), pendingLabel: basename(repo) }));
+      const { results, scan } = await runTask("Preparing repositories and generating commit messages in parallel", "Repositories prepared", async () => {
+        const scan = await hasGitleaks();
+        const results = await Promise.allSettled(repositories.map(async (repository) => {
+          const { repo } = repository;
+          const { branch, hasChanges } = await getRepoStatus(repo);
+          repository.label = `${basename(repo)} (${branch})`;
+          repository.pendingLabel = hasChanges ? styleText("bold", repository.label) : repository.label;
+          if (!args.staged) await stageAll(repo);
+          const diff = await getStagedDiff(repo);
+          if (!diff.trim()) return null;
+          const stats = await getStagedDiffStats(repo);
+          if (scan) await scanStagedChanges(repo);
+          const message = await generateCommitMessage(diff, config, args.type);
+          if (!message) throw new Error("The model returned an empty message.");
+          return { ...repository, message, stats };
+        }));
+        for (const [index, result] of results.entries()) {
+          if (result.status === "rejected") throw new Error(`${repositories[index]!.pendingLabel}: ${errorMessage(result.reason)}`);
+        }
+        return { results, scan };
+      });
+      if (!scan) log.info("Gitleaks not found, skipping secret scan.");
 
-    const toSend: Repository[] = [];
-    let previousBranchInput = "";
-    for (const draft of selected) {
-      try {
+      const drafts: CommitDraft[] = [];
+      for (const [index, result] of results.entries()) {
+        if (result.status === "fulfilled") {
+          if (result.value) drafts.push(result.value);
+          else log.info(`${repositories[index]!.pendingLabel}: nothing to commit.`);
+        }
+      }
+
+      const selected = drafts.length ? await reviewMessages(drafts, interactive && !args.yes) : [];
+      if (!selected) {
+        cancel("Cancelled (changes left staged).");
+        return;
+      }
+
+      const toSend: Repository[] = [];
+      let previousBranchInput = "";
+      for (const draft of selected) {
         const current = await currentBranch(draft.repo);
         if (/^(main|master|principal|dev|development)$/.test(current)) {
           if (!interactive) throw new Error("Committing on a protected branch requires a terminal to choose a branch. Changes remain staged.");
@@ -218,67 +198,48 @@ export const commitCommand = defineCommand({
             draft.pendingLabel = styleText("bold", draft.label);
           }
         }
-        if (!await runGitTask(draft.label, "commit", `${draft.label}: committed ${draft.message}`, (onHook, onOutput) =>
-          gitCommit(draft.repo, draft.message, onHook, onOutput))) {
-          process.exitCode = 1;
-          continue;
-        }
+        await runTask(`${draft.label}: commit`, `${draft.label}: committed ${draft.message}`, (onOutput) =>
+          gitCommit(draft.repo, draft.message, undefined, onOutput));
         toSend.push(draft);
-      } catch (error) {
-        reportGitFailure(`${draft.pendingLabel}: commit failed`, error);
-        process.exitCode = 1;
       }
-    }
-    if (toSend.length === 0) return;
-    if (!interactive && !args.push) return;
+      if (toSend.length === 0) return;
+      if (!interactive && !args.push) return;
 
-    const destinations: { repo: string; label: string; branch: string; remote: string }[] = [];
-    for (const { repo, label } of toSend) {
-      try {
+      const destinations: { repo: string; label: string; branch: string; remote: string }[] = [];
+      for (const { repo, label } of toSend) {
         const branch = await currentBranch(repo);
         const remote = await getUpstreamRemote(repo, branch);
         if (remote) destinations.push({ repo, label, branch, remote });
         else log.warn(`${label}: no configured upstream remote. Skipping push; commit remains local.`);
-      } catch (error) {
-        reportGitFailure(`${label}: push failed`, error);
-        process.exitCode = 1;
-        return;
       }
-    }
 
-    let shouldPush = Boolean(args.push);
-    if (!shouldPush && interactive && destinations.length) {
-      const answer = await confirm({
-        message: `Push ${destinations.map(({ label }) => label).join(", ")}?`,
-        initialValue: false,
-      });
-      if (isCancel(answer)) {
-        outro("Committed. Not pushed.");
-        return;
-      }
-      shouldPush = answer;
-    }
-
-    if (shouldPush) {
-      for (const { repo, label, branch, remote } of destinations) {
-        if (!await runGitTask(label, "push", `${label}: pushed to ${remote}/${branch}`, (onHook, onOutput) =>
-          push(repo, remote, branch, onHook, onOutput))) {
-          process.exitCode = 1;
-          outro("Sending stopped after a Git failure.");
+      let shouldPush = Boolean(args.push);
+      if (!shouldPush && interactive && destinations.length) {
+        const answer = await confirm({
+          message: `Push ${destinations.map(({ label }) => label).join(", ")}?`,
+          initialValue: false,
+        });
+        if (isCancel(answer)) {
+          outro("Committed. Not pushed.");
           return;
         }
+        shouldPush = answer;
       }
-    }
 
-    if (interactive) outro(process.exitCode ? "Finished with errors." : "Done.");
+      if (shouldPush) {
+        for (const { repo, label, branch, remote } of destinations) {
+          await runTask(`${label}: push`, `${label}: pushed to ${remote}/${branch}`, (onOutput) =>
+            push(repo, remote, branch, undefined, onOutput));
+        }
+      }
+
+      if (interactive) outro("Done.");
+    } catch (error) {
+      log.error(errorMessage(error));
+      process.exitCode = 1;
+    }
   },
 });
-
-/** Report Git failures without repeating native diagnostics or hook failure statuses. */
-function reportGitFailure(message: string, error: unknown): void {
-  if (error instanceof GitOutputError && error.hookFailureReported) return;
-  log.error(error instanceof GitOutputError ? message : `${message}: ${errorMessage(error)}`);
-}
 
 async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean): Promise<CommitDraft[] | null> {
   while (true) {

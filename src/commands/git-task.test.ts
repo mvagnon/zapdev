@@ -1,4 +1,3 @@
-import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("@clack/prompts", () => ({
@@ -9,16 +8,14 @@ vi.mock("@clack/prompts", () => ({
 
 import { log, spinner, taskLog } from "@clack/prompts";
 import { GitOutputError } from "../lib/errors";
-import { runGitTask } from "./git-task";
+import { runTask } from "./git-task";
 
-const block = { message: vi.fn(), success: vi.fn(), error: vi.fn(), group: vi.fn() };
 const loader = { start: vi.fn(), stop: vi.fn(), error: vi.fn(), cancel: vi.fn(), message: vi.fn(), clear: vi.fn(), isCancelled: false };
 const stdinTTY = process.stdin.isTTY;
 const stdoutTTY = process.stdout.isTTY;
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(taskLog).mockReturnValue(block);
   vi.mocked(spinner).mockReturnValue(loader);
   process.stdin.isTTY = true;
   process.stdout.isTTY = true;
@@ -30,78 +27,40 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("streams partial native output without successful hook statuses into one retained task log", async () => {
-  const success = await runGitTask("repo", "push", "repo: pushed", async (onHook, onOutput) => {
-    onOutput("Partial", "stdout");
-    onOutput(" output\n", "stderr");
-    onHook({ name: "pre-push", phase: "exit", exitCode: 0 });
-  });
-
-  expect(success).toBe(true);
-  expect(taskLog).toHaveBeenCalledExactlyOnceWith({ title: "repo: push: running…", limit: 10, retainLog: true });
-  expect(loader.start).toHaveBeenCalledTimes(1);
-  expect(block.message.mock.calls).toEqual([
-    ["Partial", { raw: true }], [" output\n", { raw: true }],
-  ]);
-  expect(block.success).toHaveBeenCalledExactlyOnceWith("repo: pushed", { showLog: true });
-  expect(log.success).not.toHaveBeenCalled();
-});
-
-it("does not create an empty block for a silent command", async () => {
-  await expect(runGitTask("repo", "commit", "repo: committed", async () => {
-    expect(loader.start).toHaveBeenCalledExactlyOnceWith("repo: commit");
-  })).resolves.toBe(true);
-  expect(loader.clear).toHaveBeenCalledTimes(1);
-  expect(taskLog).not.toHaveBeenCalled();
-  expect(log.success).toHaveBeenCalledExactlyOnceWith("repo: committed");
-});
-
-it("uses a shared task log group without a separate spinner or task log", async () => {
-  const group = { message: vi.fn(), success: vi.fn(), error: vi.fn() };
-  await expect(runGitTask("repo", "pull", "repo: pulled", async (onHook, onOutput) => {
-    onOutput("native output\n", "stdout");
-    onHook({ name: "post-merge", phase: "start" });
-    onHook({ name: "post-merge", phase: "exit", exitCode: 0 });
-  }, group)).resolves.toBe(true);
-  expect(group.message.mock.calls).toEqual([
-    ["native output\n", { raw: true }], ["repo: post-merge: running…"],
-  ]);
-  expect(group.success).toHaveBeenCalledExactlyOnceWith("repo: pulled", { showLog: true });
-  expect(spinner).not.toHaveBeenCalled();
-  expect(taskLog).not.toHaveBeenCalled();
-});
-
-it("retains a grouped failure diagnostic after the shared task log is finalized", async () => {
-  const prompts = await vi.importActual<typeof import("@clack/prompts")>("@clack/prompts");
-  const output = new PassThrough();
-  output.setEncoding("utf8");
-  const task = prompts.taskLog({ title: "Pulling repositories", output, retainLog: true });
-  await expect(runGitTask("repo", "pull", "repo: pulled", async () => {
-    throw new Error("Diverged history");
-  }, task.group("repo"))).resolves.toBe(false);
-  task.error("Pulling failed");
-  expect(output.read()).toContain("repo: pull failed: Diverged history");
-});
-
-it("retains failed output without repeating native diagnostics", async () => {
-  await expect(runGitTask("repo", "commit", "repo: committed", async (_onHook, onOutput) => {
-    onOutput("native diagnostic\n", "stderr");
-    throw new GitOutputError("native diagnostic");
-  })).resolves.toBe(false);
-  expect(block.error).toHaveBeenCalledExactlyOnceWith("repo: commit failed");
-  expect(log.error).not.toHaveBeenCalled();
-});
-
-it("streams stdout and stderr directly without task logs outside a terminal", async () => {
-  process.stdout.isTTY = false;
+it.each([true, false])("starts and stops once without reacting to Git output (TTY=%s)", async (interactive) => {
+  process.stdout.isTTY = interactive;
   const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
   const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-  await expect(runGitTask("repo", "pull", "repo: pulled", async (_onHook, onOutput) => {
+  await expect(runTask("repo: pull", "repo: pulled", async (onOutput) => {
     onOutput("stdout", "stdout");
     onOutput("stderr", "stderr");
-  })).resolves.toBe(true);
-  expect(stdout).toHaveBeenCalledWith("stdout");
-  expect(stderr).toHaveBeenCalledWith("stderr");
+    expect(loader.start).toHaveBeenCalledTimes(interactive ? 1 : 0);
+    expect(loader.stop).not.toHaveBeenCalled();
+    expect(loader.clear).not.toHaveBeenCalled();
+    return 42;
+  })).resolves.toBe(42);
+  expect(stdout).not.toHaveBeenCalled();
+  expect(stderr).not.toHaveBeenCalled();
+  expect(loader.clear).not.toHaveBeenCalled();
   expect(taskLog).not.toHaveBeenCalled();
-  expect(spinner).not.toHaveBeenCalled();
+  if (interactive) {
+    expect(loader.start).toHaveBeenCalledExactlyOnceWith("repo: pull");
+    expect(loader.stop).toHaveBeenCalledExactlyOnceWith("repo: pulled");
+  } else {
+    expect(spinner).not.toHaveBeenCalled();
+    expect(log.info).toHaveBeenCalledExactlyOnceWith("repo: pull");
+    expect(log.success).toHaveBeenCalledExactlyOnceWith("repo: pulled");
+  }
+});
+
+it.each([true, false])("stops the spinner and propagates captured failure diagnostics (TTY=%s)", async (interactive) => {
+  process.stdout.isTTY = interactive;
+  await expect(runTask("repo: commit", "repo: committed", async (onOutput) => {
+    onOutput("native diagnostic\n", "stderr");
+    throw new GitOutputError("native diagnostic");
+  })).rejects.toThrow("repo: commit failed: native diagnostic");
+  expect(loader.clear).toHaveBeenCalledTimes(interactive ? 1 : 0);
+  expect(loader.stop).not.toHaveBeenCalled();
+  expect(log.success).not.toHaveBeenCalled();
+  expect(taskLog).not.toHaveBeenCalled();
 });
