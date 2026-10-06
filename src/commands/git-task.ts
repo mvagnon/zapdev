@@ -34,12 +34,13 @@ export async function runGitTask(
   };
   const onHook: HookReporter = (event) => {
     loader?.clear();
-    const hook = `${label}: ${event.name}`;
-    const message = event.phase === "start" ? `${hook}: running…` : `${hook}: ${event.exitCode === 0 ? "completed" : `failed (exit ${event.exitCode})`}`;
-    if (task) task.message(message);
-    else if (event.phase === "start") log.step(styleText("bold", message));
-    else if (event.exitCode === 0) log.success(message);
-    else log.error(message);
+    if (event.phase === "start" || event.exitCode !== 0) {
+      const hook = `${label}: ${event.name}`;
+      const message = event.phase === "start" ? `${hook}: running…` : `${hook}: failed (exit ${event.exitCode})`;
+      if (task) task.message(message);
+      else if (event.phase === "start") log.step(styleText("bold", message));
+      else log.error(message);
+    }
     if (event.phase === "exit" && !task) startLoading();
   };
   if (!interactive) log.info(title);

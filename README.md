@@ -114,7 +114,7 @@ Stages all changes, scans them with Gitleaks when installed, generates Conventio
 - **Unified review:** generates messages in parallel, then presents every message with its repository name and branch. Repositories with pending changes are shown in bold when terminal styling is enabled.
 - **Actions:** commit all, commit only a named repository, edit a named repository's message, or cancel. Editing returns to the review menu.
 
-Repositories with no new changes can still send existing commits. Unselected or cancelled changes remain staged; failed or unselected commit drafts are not pushed. The branch is chosen before committing, never when pushing. Push confirmation is asked once, only for repositories with a configured upstream remote; it is omitted when none have one.
+Only repositories successfully committed during the current run are offered for push or pushed with `--push`. Unselected or cancelled changes remain staged; failed or unselected commit drafts are not pushed. The branch is chosen before committing, never when pushing. Push confirmation is asked once, only for repositories with a configured upstream remote; it is omitted when none have one.
 
 ```bash
 zapdev commit
@@ -127,7 +127,7 @@ zapdev commit
 | `--effort <effort>` | Override the reasoning effort                                                    |
 | `-t, --type <type>` | Force an exact lowercase Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
 | `-p, --push`        | Skip push confirmation and push the current branch                               |
-| `--pull`           | Pull fast-forward updates in repositories with an upstream remote before staging or message generation |
+| `--pull`           | Pull fast-forward updates only in repositories with changes to commit and an upstream remote |
 | `-s, --staged`      | Commit only changes that are already staged                                      |
 | `-y, --yes`         | Skip commit review; still confirm push unless `--push` is set                    |
 
@@ -143,13 +143,13 @@ Before contacting the LLM endpoint, zapdev runs `gitleaks git --staged --verbose
 
 Preparation and commit failures are reported per repository while the others continue. A push failure stops all remaining sends. Any failure produces a nonzero exit code.
 
-With `--pull`, repositories are pulled one at a time before any staging, secret scan, or message generation. Git uses each current branch's configured upstream. Repositories without a configured upstream remote are skipped with a warning, even if they have a single remote. Divergent history, a missing upstream branch, or conflicting local changes stop the entire flow before staging; no rebase, merge commit, or automatic stash is performed. Earlier successful pulls remain applied.
+With `--pull`, only repositories with local changes are pulled, one at a time before any staging, secret scan, or message generation. With `--staged`, only repositories with a staged diff are pulled. Git uses each current branch's configured upstream. Repositories without a configured upstream remote are skipped with a warning, even if they have a single remote. Divergent history, a missing upstream branch, or conflicting local changes stop the entire flow before staging; no rebase, merge commit, or automatic stash is performed. Earlier successful pulls remain applied.
 
 In a terminal, commit, pull, and push output is streamed into Clack task logs; silent commands create no output block. Git keeps terminal input, but stdout/stderr are pipes: hooks requiring a TTY on those streams are not supported. Git controls hook stdin; hooks can read from `/dev/tty`, although prompts written there appear outside the blocks. `--yes` skips commit review, not native prompts. Without a terminal, stdout/stderr are streamed directly. Each hook has a 60-second deadline, including time spent answering prompts; override it with `ZD_HOOK_TIMEOUT=120 zapdev commit`.
 
 Immediately before each selected commit, zapdev asks for a local branch only when the current name exactly matches `main`, `master`, `principal`, `dev`, or `development`, including with `--yes`. The first prompt starts empty; subsequent prompts reuse the previous input across repositories. Press Enter to accept the prefilled name; an empty or cleared input keeps the current branch and leaves the next prompt empty. A different name switches to the existing local branch or creates it from HEAD, without forcing or discarding pending changes. Other branches and repositories with nothing to commit never trigger this prompt. Cancelling stops the remaining commits and all pushes; earlier commits remain local.
 
-Pushes always target a remote branch with the current local branch's name, with no destination input. They use only the current branch's configured upstream remote and run `git push <remote> HEAD:refs/heads/<current-branch>`. Repositories without a configured upstream remote are skipped with a warning, even if they have a single remote. Pushes run directly, without a preliminary fetch or history comparison; Git handles up-to-date branches and rejects non-fast-forward updates. A missing destination branch can be created even without new changes. No rebase, merge, retry, or force-push.
+Pushes always target a remote branch with the current local branch's name, with no destination input. They use only the current branch's configured upstream remote and run `git push <remote> HEAD:refs/heads/<current-branch>`. Repositories without a configured upstream remote are skipped with a warning, even if they have a single remote. Pushes run directly, without a preliminary fetch or history comparison; Git handles up-to-date branches and rejects non-fast-forward updates. No rebase, merge, retry, or force-push.
 
 Without a TTY, zapdev commits prepared repositories on nonprotected branches automatically; protected-branch commits are refused and changes remain staged. `--push` can publish without a TTY; without it, commits stay local. Repositories without new changes do not trigger an LLM call, branch prompt, or new commit.
 

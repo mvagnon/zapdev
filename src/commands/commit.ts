@@ -117,6 +117,10 @@ export const commitCommand = defineCommand({
       for (const repo of repos) {
         const label = basename(repo);
         try {
+          const hasChanges = args.staged
+            ? Boolean((await getStagedDiff(repo)).trim())
+            : (await getRepoStatus(repo)).hasChanges;
+          if (!hasChanges) continue;
           const branch = await currentBranch(repo);
           if (!await getUpstreamRemote(repo, branch)) {
             log.warn(`${label}: no configured upstream remote. Skipping pull.`);
@@ -165,7 +169,6 @@ export const commitCommand = defineCommand({
     loader?.stop("Repositories prepared");
 
     const drafts: CommitDraft[] = [];
-    const unchanged: Repository[] = [];
     for (const [index, result] of results.entries()) {
       if (result.status === "rejected") {
         log.error(`${repositories[index]!.pendingLabel}: ${errorMessage(result.reason)}`);
@@ -174,7 +177,6 @@ export const commitCommand = defineCommand({
         drafts.push(result.value);
       } else {
         log.info(`${repositories[index]!.pendingLabel}: nothing to commit.`);
-        unchanged.push(repositories[index]!);
       }
     }
 
@@ -218,7 +220,6 @@ export const commitCommand = defineCommand({
         process.exitCode = 1;
       }
     }
-    toSend.push(...unchanged);
     if (toSend.length === 0) return;
     if (!interactive && !args.push) return;
 

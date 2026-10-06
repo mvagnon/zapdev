@@ -29,7 +29,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("streams partial native output and hook statuses into one retained task log", async () => {
+it("streams partial native output without successful hook statuses into one retained task log", async () => {
   const success = await runGitTask("repo", "push", "repo: pushed", async (onHook, onOutput) => {
     onOutput("Partial", "stdout");
     onOutput(" output\n", "stderr");
@@ -41,7 +41,6 @@ it("streams partial native output and hook statuses into one retained task log",
   expect(loader.start).toHaveBeenCalledTimes(1);
   expect(block.message.mock.calls).toEqual([
     ["Partial", { raw: true }], [" output\n", { raw: true }],
-    ["repo: pre-push: completed"],
   ]);
   expect(block.success).toHaveBeenCalledExactlyOnceWith("repo: pushed", { showLog: true });
   expect(log.success).not.toHaveBeenCalled();
