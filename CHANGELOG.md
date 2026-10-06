@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.0](https://github.com/mvagnon/zapdev/compare/v1.8.0...v1.9.0) (2026-10-06)
+
+
+### Features
+
+* Improve push flow for shared commits ([d41a67e](https://github.com/mvagnon/zapdev/commit/d41a67e1ae96ec1fae722c415ea1ddfeeadd5a25))
+* **subtree:** add subtree-init command support ([fbb6e3f](https://github.com/mvagnon/zapdev/commit/fbb6e3fc557afaa0d2580f12cfac8052e17642ca))
+
 ## [1.8.0](https://github.com/mvagnon/zapdev/compare/v1.7.0...v1.8.0) (2026-10-06)
 
 
