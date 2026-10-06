@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.0](https://github.com/mvagnon/zapdev/compare/v1.18.0...v2.0.0) (2026-10-06)
+
+
+### Miscellaneous Chores
+
+* release 2.0.0 ([38f4a51](https://github.com/mvagnon/zapdev/commit/38f4a517cf34b7147626abe0f4530ecaa7517e4b))
+
 ## [1.18.0](https://github.com/mvagnon/zapdev/compare/v1.17.0...v1.18.0) (2026-10-06)
 
 
