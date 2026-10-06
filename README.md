@@ -131,18 +131,20 @@ zapdev commit
 | `-s, --staged`      | Commit only changes that are already staged                       |
 | `-r, --rebase`      | Rebase on upstream if the push is rejected                        |
 | `-m, --merge`       | Merge upstream if the push is rejected                            |
-| `-y, --yes`         | Skip prompts and commit all prepared repositories                 |
+| `-y, --yes`         | Skip commit review; still confirm push unless `--push` is set     |
 
 ```bash
 zapdev commit -t feat      # force the type
 zapdev commit --staged     # leave unstaged changes untouched
+zapdev commit -y           # commit automatically, then ask before pushing
+zapdev commit -yp          # commit and push without confirmation
 ```
 
 Before contacting the LLM endpoint, zapdev runs `gitleaks git --staged --verbose` in each changed repository when Gitleaks is installed. A failed scan skips that repository without sending its diff; when Gitleaks is absent, the scan is skipped. The staged diff is sent to the configured endpoint, which may be remote.
 
 Failures are reported per repository while the others continue. Any failure produces a nonzero exit code.
 
-In a terminal, Git and its hooks display live logs and support native prompts, even with `--yes` (which only skips zapdev prompts). Git controls hook stdin; interactive hooks should read from the terminal, for example `/dev/tty`. Each hook has a 60-second deadline, including time spent answering prompts; override it with `ZD_HOOK_TIMEOUT=120 zapdev commit`.
+In a terminal, Git and its hooks display live logs and support native prompts, even with `--yes` (which skips commit review, not native Git prompts). Git controls hook stdin; interactive hooks should read from the terminal, for example `/dev/tty`. Each hook has a 60-second deadline, including time spent answering prompts; override it with `ZD_HOOK_TIMEOUT=120 zapdev commit`.
 
 Pushing is optimistic, with no preliminary fetch. If the branch is behind upstream, `--rebase` runs `git pull --rebase`, while `--merge` runs `git pull --no-rebase --no-edit`; zapdev then retries once. Without either flag, interactive runs ask whether to rebase, merge, or quit. Runs using `--yes` or without a TTY must provide one of the flags.
 
@@ -166,7 +168,7 @@ Place an optional `zapdev.json` in the directory where you launch zapdev:
 - **Publication:** fetch each remote's `main`, split committed contents, skip contents identical to `main`, then push without force. Uncommitted changes are excluded.
 - **Failures:** stop that repository's publication, leaving earlier publications intact; other repositories continue. No automatic rebase/merge recovery.
 
-Interactive runs still ask for confirmation; `--push` publishes without asking. `--yes` alone does not publish.
+Interactive runs still ask for confirmation, including with `--yes`; `--push` publishes without asking. Without a TTY, `--yes` alone does not publish.
 
 ```bash
 zapdev commit --publish-subtree        # ask to publish after committing

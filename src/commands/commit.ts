@@ -97,7 +97,7 @@ export const commitCommand = defineCommand({
     yes: {
       type: "boolean",
       alias: "y",
-      description: "Skip prompts and commit directly.",
+      description: "Skip commit review; still confirm push unless --push is set.",
     },
   },
   async run({ args }) {
@@ -215,7 +215,7 @@ export const commitCommand = defineCommand({
     if (committed.length === 0) return;
 
     let shouldPush = Boolean(args.push);
-    if (!shouldPush && interactive && !args.yes) {
+    if (!shouldPush && interactive) {
       const answer = await confirm({
         message: `${publishSubtreeMode ? "Publish subtrees in" : "Push"} ${committed.map(({ label }) => label).join(", ")}?`,
         initialValue: false,

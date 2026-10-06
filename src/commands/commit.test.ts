@@ -85,6 +85,7 @@ it("generates all messages concurrently before committing any repository", async
   expect(git.commit).toHaveBeenCalledWith("/repos/front", "fix: front", expect.any(Function));
   expect(git.commit).toHaveBeenCalledWith("/repos/back", "fix: back", expect.any(Function));
   expect(select).not.toHaveBeenCalled();
+  expect(confirm).toHaveBeenCalledTimes(1);
   expect(git.push).not.toHaveBeenCalled();
 }, 1_000);
 
@@ -97,6 +98,43 @@ it("honors --staged and skips clean repositories when committing and pushing", a
   expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function));
   expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", expect.any(Function));
   expect(git.fetchRemote).not.toHaveBeenCalled();
+  expect(confirm).not.toHaveBeenCalled();
+});
+
+it.each([false, true])("skips commit review with --yes but confirms sending (subtree=%s)", async (subtree) => {
+  vi.mocked(resolvePublishSubtree).mockResolvedValue(subtree);
+  vi.mocked(confirm).mockImplementation(async () => {
+    expect(git.commit).toHaveBeenCalledTimes(2);
+    return true;
+  });
+  await runCommand(commitCommand, { rawArgs: ["-y"] });
+  expect(select).not.toHaveBeenCalled();
+  expect(confirm).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    message: `${subtree ? "Publish subtrees in" : "Push"} front (main), back (main)?`,
+    initialValue: false,
+  }));
+  expect(git.push).toHaveBeenCalledTimes(subtree ? 0 : 2);
+  expect(git.publishSubtree).toHaveBeenCalledTimes(subtree ? 4 : 0);
+});
+
+it.each([false, Symbol("cancel")])("keeps --yes commits local when publication is declined or cancelled: %s", async (answer) => {
+  vi.mocked(confirm).mockResolvedValue(answer);
+  await runCommand(commitCommand, { rawArgs: ["-y", "--publish-subtree"] });
+  expect(git.commit).toHaveBeenCalledTimes(2);
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(git.push).not.toHaveBeenCalled();
+  expect(git.publishSubtree).not.toHaveBeenCalled();
+});
+
+it.each([false, true])("never prompts or sends with --yes without a TTY (subtree=%s)", async (subtree) => {
+  process.stdin.isTTY = false;
+  process.stdout.isTTY = false;
+  vi.mocked(resolvePublishSubtree).mockResolvedValue(subtree);
+  await runCommand(commitCommand, { rawArgs: ["-y"] });
+  expect(git.commit).toHaveBeenCalledTimes(2);
+  expect(confirm).not.toHaveBeenCalled();
+  expect(git.push).not.toHaveBeenCalled();
+  expect(git.publishSubtree).not.toHaveBeenCalled();
 });
 
 it("never sends a failed secret scan to the LLM and still processes the other repo", async () => {
