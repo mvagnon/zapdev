@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/mvagnon/zapdev/compare/v1.13.0...v1.14.0) (2026-10-06)
+
+
+### Features
+
+* Improve documentation on pull and push behavior ([5d1dfa9](https://github.com/mvagnon/zapdev/commit/5d1dfa94dca856d8635a04a84f32978c27fa726e))
+
 ## [1.13.0](https://github.com/mvagnon/zapdev/compare/v1.12.0...v1.13.0) (2026-10-06)
 
 
