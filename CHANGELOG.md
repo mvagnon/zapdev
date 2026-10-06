@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/mvagnon/zapdev/compare/v1.12.0...v1.13.0) (2026-10-06)
+
+
+### Features
+
+* Enhance git integration regarding prompts and timeouts ([3e5800b](https://github.com/mvagnon/zapdev/commit/3e5800bf61f728eec40315cc9f640c65aec1b623))
+
 ## [1.12.0](https://github.com/mvagnon/zapdev/compare/v1.11.0...v1.12.0) (2026-10-06)
 
 
