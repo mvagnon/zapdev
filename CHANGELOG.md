@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/mvagnon/zapdev/compare/v2.1.0...v2.1.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **docs:** add --no-push flag for local commits ([fd63f0e](https://github.com/mvagnon/zapdev/commit/fd63f0eb4580cb4bd43cc1c616a6d59dc0aa352f))
+
 ## [2.1.0](https://github.com/mvagnon/zapdev/compare/v2.0.0...v2.1.0) (2026-10-06)
 
 
