@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/mvagnon/zapdev/compare/v1.15.0...v1.16.0) (2026-10-06)
+
+
+### Features
+
+* Refine readme on push behavior ([504d90b](https://github.com/mvagnon/zapdev/commit/504d90b8ac417542f610789cc256039ba0811ff1))
+
 ## [1.15.0](https://github.com/mvagnon/zapdev/compare/v1.14.0...v1.15.0) (2026-10-06)
 
 
