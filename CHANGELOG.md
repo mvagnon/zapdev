@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/mvagnon/zapdev/compare/v1.7.0...v1.8.0) (2026-10-06)
+
+
+### Features
+
+* Improve commit command help text and tests ([6184202](https://github.com/mvagnon/zapdev/commit/61842024e3d27c0121f97113834e7a81c88481ce))
+
 ## [1.7.0](https://github.com/mvagnon/zapdev/compare/v1.6.0...v1.7.0) (2026-10-06)
 
 
