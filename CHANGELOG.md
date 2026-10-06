@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/mvagnon/zapdev/compare/v1.10.0...v1.11.0) (2026-10-06)
+
+
+### Features
+
+* Update push behavior descriptions and improve clarity ([ca103d3](https://github.com/mvagnon/zapdev/commit/ca103d3b86e47c99cb25062ccad00629400ec792))
+
 ## [1.10.0](https://github.com/mvagnon/zapdev/compare/v1.9.0...v1.10.0) (2026-10-06)
 
 
