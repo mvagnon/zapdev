@@ -14,7 +14,9 @@ import type { HookReporter } from "../types/git";
 /** Run Git directly, preserving terminal output and enforcing native hook deadlines. */
 export async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<string> {
   const timeout = resolveHookTimeout();
-  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY && ["commit", "push", "subtree", "fetch"].includes(args[0] ?? ""));
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY
+    && ["commit", "push", "subtree", "fetch"].includes(args[0] ?? "")
+    && !(args[0] === "subtree" && args[1] === "split"));
   const terminalState = interactive && process.platform !== "win32"
     ? execFileSync("stty", ["-g"], { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim()
     : undefined;
@@ -129,22 +131,25 @@ export async function getPushRemote(repo: string, branch: string): Promise<strin
   return remotes.length === 1 ? remotes[0]! : null;
 }
 
-/** Push the requested branch to the selected remote without changing its upstream. */
+/** Push current HEAD to a destination branch without changing local branches or their upstreams. */
 export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter): Promise<void> {
   await git(["check-ref-format", "--branch", branch], repo);
-  await git(["push", "--", remote, branch], repo, onHook);
+  await git(["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook);
 }
 
-/** Compare committed subtree contents with the remote's default branch. */
-export async function hasSubtreeChanges(repo: string, prefix: string, remote: string, onHook?: HookReporter): Promise<boolean> {
-  await git(["fetch", "--quiet", remote, "HEAD"], repo, onHook);
-  const changes = await git(["diff", "--name-only", "FETCH_HEAD", `HEAD:${prefix}`, "--"], repo);
-  return Boolean(changes.trim());
+/** Check committed repository or subtree history against the presumed destination branch. */
+export async function hasUnpushedCommits(repo: string, remote: string, branch: string, onHook?: HookReporter, prefix?: string): Promise<boolean> {
+  if (await tryGit(["rev-parse", "--verify", "HEAD"], repo) === null) return false;
+  await git(["check-ref-format", "--branch", branch], repo);
+  const source = prefix ? (await git(["subtree", "split", `--prefix=${prefix}`, "--quiet", "HEAD"], repo)).trim() : "HEAD";
+  const ref = `refs/heads/${branch}`;
+  if (!(await git(["ls-remote", "--heads", "--", remote, ref], repo)).trim()) return true;
+  await git(["fetch", "--quiet", "--", remote, ref], repo, onHook);
+  return Boolean((await git(["rev-list", "--max-count=1", `FETCH_HEAD..${source}`], repo)).trim());
 }
 
 /** Push committed subtree contents to the requested branch without force. */
 export async function publishSubtree(repo: string, prefix: string, remote: string, branch: string, onHook?: HookReporter): Promise<void> {
-  if (branch === "main") throw new Error("Refusing to publish directly to main.");
   await git(["check-ref-format", "--branch", branch], repo);
   await git(["subtree", "push", `--prefix=${prefix}`, remote, branch], repo, onHook);
 }

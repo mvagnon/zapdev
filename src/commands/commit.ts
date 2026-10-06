@@ -23,7 +23,7 @@ import {
   getPushRemote,
   getRepoStatus,
   getStagedDiff,
-  hasSubtreeChanges,
+  hasUnpushedCommits,
   publishSubtree,
   push,
   stageAll,
@@ -147,6 +147,7 @@ export const commitCommand = defineCommand({
     loader?.stop("Repositories prepared");
 
     const drafts: CommitDraft[] = [];
+    const unchanged: Repository[] = [];
     for (const [index, result] of results.entries()) {
       if (result.status === "rejected") {
         log.error(`${repositories[index]!.pendingLabel}: ${errorMessage(result.reason)}`);
@@ -155,15 +156,11 @@ export const commitCommand = defineCommand({
         drafts.push(result.value);
       } else {
         log.info(`${repositories[index]!.pendingLabel}: nothing to commit.`);
+        unchanged.push(repositories[index]!);
       }
     }
 
-    if (drafts.length === 0) {
-      if (interactive) outro("No commits prepared.");
-      return;
-    }
-
-    const selected = await reviewMessages(drafts, interactive && !args.yes);
+    const selected = drafts.length ? await reviewMessages(drafts, interactive && !args.yes) : [];
     if (!selected) {
       cancel("Cancelled (changes left staged).");
       return;
@@ -181,12 +178,13 @@ export const commitCommand = defineCommand({
         process.exitCode = 1;
       }
     }
-    if (committed.length === 0) return;
+    const toSend: Repository[] = [...committed, ...unchanged];
+    if (toSend.length === 0) return;
 
     let shouldPush = Boolean(args.push);
     if (!shouldPush && interactive) {
       const answer = await confirm({
-        message: `${publishSubtreeMode ? "Publish subtrees in" : "Push"} ${committed.map(({ label }) => label).join(", ")}?`,
+        message: `${publishSubtreeMode ? "Publish subtrees in" : "Push"} ${toSend.map(({ label }) => label).join(", ")}?`,
         initialValue: false,
       });
       if (isCancel(answer)) {
@@ -202,8 +200,9 @@ export const commitCommand = defineCommand({
         process.exitCode = 1;
         return;
       }
-      let previousSubtreeBranch: string | undefined;
-      for (const { repo, label } of committed) {
+      let previousBranchInput = "";
+      for (const repository of toSend) {
+        const { repo, label } = repository;
         try {
           const current = await currentBranch(repo);
           const destinations: [string, string | null][] = publishSubtreeMode
@@ -214,21 +213,20 @@ export const commitCommand = defineCommand({
               log.warn(`${label}: no remote or ambiguous remote choice. Skipping push; commit remains local.`);
               continue;
             }
-            if (publishSubtreeMode && !await hasSubtreeChanges(repo, prefix, remote, reportHooks(label))) {
-              log.info(`${label}: no changes in ${prefix}. Skipping.`);
+            if (!await hasUnpushedCommits(repo, remote, previousBranchInput || current, reportHooks(label), prefix || undefined)) {
+              log.info(`${label}: no unpushed commits${prefix ? ` in ${prefix}` : ""}. Skipping.`);
               continue;
             }
             const answer = await text({
               message: `${label}: branch to push ${publishSubtreeMode ? `${prefix} to ` : "to "}${remote}`,
-              initialValue: publishSubtreeMode ? previousSubtreeBranch ?? current : current,
-              validate: (value) => value?.trim() ? undefined : "Branch cannot be empty.",
+              initialValue: previousBranchInput,
             });
             if (isCancel(answer)) {
               outro("Sending cancelled. Remaining commits stay local.");
               return;
             }
-            const branch = answer.trim();
-            if (publishSubtreeMode) previousSubtreeBranch = branch;
+            previousBranchInput = answer.trim();
+            const branch = previousBranchInput || current;
             log.info(`${label}: pushing ${publishSubtreeMode ? `${prefix} → ` : ""}${remote}/${branch}`);
             if (publishSubtreeMode) await publishSubtree(repo, prefix, remote, branch, reportHooks(label));
             else await push(repo, remote, branch, reportHooks(label));

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { resolveSubtrees } from "./config";
-import { git, hasSubtreeChanges } from "./git";
+import { git, hasUnpushedCommits } from "./git";
 import { initializeSubtrees, parseSubtreeSources } from "./subtree-init";
 
 let root: string;
@@ -63,8 +63,8 @@ it("initializes named remotes, imports their default branches and commits the ne
   expect((await git(["remote", "get-url", "front"], repo)).trim()).toBe(front);
   expect((await git(["branch", "--show-current"], repo)).trim()).toBe("main");
   expect(await git(["status", "--porcelain"], repo)).toBe("");
-  await expect(hasSubtreeChanges(repo, "front", "front")).resolves.toBe(false);
-  await expect(hasSubtreeChanges(repo, "back", "back")).resolves.toBe(false);
+  await expect(hasUnpushedCommits(repo, "front", "master", undefined, "front")).resolves.toBe(false);
+  await expect(hasUnpushedCommits(repo, "back", "release", undefined, "back")).resolves.toBe(false);
 }, 15_000);
 
 it("extends an existing mapping without overwriting other configuration or switching branches", async () => {

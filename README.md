@@ -113,7 +113,7 @@ Stages all changes, scans them with Gitleaks when installed, generates Conventio
 - **Unified review:** generates messages in parallel, then presents every message with its repository name and branch. Repositories with pending changes are shown in bold and underlined when terminal styling is enabled.
 - **Actions:** commit all, commit only a named repository, edit a named repository's message, or cancel. Editing returns to the review menu.
 
-Repositories with nothing to commit are skipped. Unselected or cancelled changes remain staged. Push confirmation is asked once for the successfully committed repositories.
+Repositories with no new changes can still send existing commits. Unselected or cancelled changes remain staged; failed or unselected commit drafts are not pushed. Push confirmation is asked once, followed by a destination input for each eligible repository or subtree.
 
 ```bash
 zapdev commit
@@ -142,7 +142,9 @@ Preparation and commit failures are reported per repository while the others con
 
 In a terminal, Git and its hooks display live logs and support native prompts, even with `--yes` (which skips commit review, not native Git prompts). Git controls hook stdin; interactive hooks should read from the terminal, for example `/dev/tty`. Each hook has a 60-second deadline, including time spent answering prompts; override it with `ZD_HOOK_TIMEOUT=120 zapdev commit`.
 
-Every push asks for a branch, even with `--yes --push`. Classic prompts are prefilled with the current branch. Classic pushes use the current branch's upstream remote, or the only configured remote if there is no upstream, and run `git push <remote> <input>` without changing the upstream. When no remote can be selected unambiguously, the repository's push is skipped with a warning, without a branch prompt. The input names the local branch to push, not a renamed destination for HEAD. Git rejections stop the command: no rebase, merge, retry, or force-push.
+Every push asks for a destination branch, even with `--yes --push`. In both modes, prompts start empty and then reuse the previous input across repositories in this run. Press Enter to accept the prefilled name; an empty or cleared input uses the current branch and leaves the next prompt empty. Pushing to `main` is allowed in both modes. Classic pushes use the current branch's upstream remote, or the only configured remote if there is no upstream, and run `git push <remote> HEAD:refs/heads/<input>` without changing local branches or their upstreams. The destination need not exist locally. When no remote can be selected unambiguously, the repository's push is skipped with a warning, without a branch prompt. Git rejections stop the command: no rebase, merge, retry, or force-push.
+
+Before each destination input, both modes check the presumed remote branch: the previous input, or the current branch when empty. If the remote branch is missing or local commits remain unpublished, zapdev asks for a destination; otherwise it skips the send. Classic mode compares HEAD; subtree mode compares its extracted history. This check cannot anticipate a different destination you would type next. Repositories without new changes do not trigger an LLM call or a new commit.
 
 Without a TTY, zapdev commits all prepared repositories automatically but cannot push; `--push` reports an error and leaves commits local.
 
@@ -163,10 +165,10 @@ Place an optional `zapdev.json` in the directory where you launch zapdev:
 | ------------------- | ------- | ------ |
 | `subtrees` | `{}` | Map repository-relative folders to Git remote names. A nonempty mapping replaces classic push with subtree publication. |
 
-- **Scope:** only the launch directory's file is read, not parents or child repositories. Its setting applies to all successfully committed repositories.
+- **Scope:** only the launch directory's file is read, not parents or child repositories. Its mapping applies to newly committed repositories and repositories without new changes.
 - **Configuration:** only `zapdev.json` selects subtree mode; no subtree CLI flag. Missing or empty `subtrees` uses classic push. Invalid configuration stops the command before staging. Replace the removed `isSubtree` option with an explicit mapping.
-- **Destinations:** only mapped folders are published, using their configured remotes; folder and remote names need not match. Each changed subtree asks for its own destination branch, prefilled with the previous answer across repositories in this run (current branch for the first prompt). Press Enter to reuse it. `main` and detached HEAD are refused.
-- **Publication:** fetch each remote's default branch (`HEAD`), skip identical committed contents without prompting, then run `git subtree push --prefix=<folder> <remote> <input>`. Uncommitted changes are excluded.
+- **Destinations:** only mapped folders are published, using their configured remotes; folder and remote names need not match. Each changed subtree asks for its own destination branch, initially empty, then prefilled with the previous input across repositories in this run. Press Enter to reuse it, or leave the input empty to use the current branch. `main` is allowed; detached HEAD is refused.
+- **Publication:** check the presumed destination branch using the shared unpublished-commit rule above, then run `git subtree push --prefix=<folder> <remote> <input>`. Already published history is skipped without prompting; uncommitted changes are excluded.
 - **Failures:** stop all remaining publications, leaving earlier publications intact. No automatic recovery.
 
 Interactive runs still ask for confirmation, including with `--yes`; `--push` skips only that confirmation, never the destination inputs. Publication requires a TTY.
