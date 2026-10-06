@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { x } from "tinyexec";
 
-import { commit, currentBranch, findRepos, getPushRemote, getRepoStatus, getStagedDiff, git, hasUnpushedCommits, push, stageAll } from "./git";
+import { commit, currentBranch, findRepos, getPushRemote, getRepoStatus, getStagedDiff, git, hasUnpushedCommits, push, stageAll, switchBranch } from "./git";
 import type { HookEvent } from "../types/git";
 
 const exec = promisify(execFile);
@@ -109,6 +109,34 @@ async function configureHooks(): Promise<string> {
   await mkdir(hooks);
   return hooks;
 }
+
+it("creates or switches local branches while preserving staged changes and the original branch", async () => {
+  await configureHooks();
+  await commit(root, "chore: initial");
+  const original = await currentBranch(root);
+  const before = await git(["rev-parse", "HEAD"], root);
+  await writeFile(join(root, "file.txt"), "pending change");
+  await stageAll(root);
+
+  await switchBranch(root, "feature/local");
+  await expect(currentBranch(root)).resolves.toBe("feature/local");
+  await expect(getStagedDiff(root)).resolves.toContain("pending change");
+  await expect(git(["rev-parse", original], root)).resolves.toBe(before);
+  await switchBranch(root, original);
+  await expect(currentBranch(root)).resolves.toBe(original);
+  await expect(getStagedDiff(root)).resolves.toContain("pending change");
+  for (const branch of ["--force", "invalid..branch", "@{-1}"]) {
+    await expect(switchBranch(root, branch)).rejects.toThrow();
+    await expect(currentBranch(root)).resolves.toBe(original);
+  }
+});
+
+it("creates an unborn branch without losing staged changes", async () => {
+  await configureHooks();
+  await switchBranch(root, "feature/initial");
+  await expect(currentBranch(root)).resolves.toBe("feature/initial");
+  await expect(getStagedDiff(root)).resolves.toContain("change");
+});
 
 it.each([0, 3])("observes live commit hooks and preserves their failure output (exit %s)", async (exitCode) => {
   const hooks = await configureHooks();

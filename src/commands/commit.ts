@@ -25,6 +25,7 @@ import {
   hasUnpushedCommits,
   push,
   stageAll,
+  switchBranch,
 } from "../lib/git";
 import { errorMessage, GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
@@ -68,7 +69,7 @@ export const commitCommand = defineCommand({
     push: {
       type: "boolean",
       alias: "p",
-      description: "Skip push confirmation; still ask for each destination branch.",
+      description: "Skip push confirmation and push the current branch.",
     },
     staged: {
       type: "boolean",
@@ -159,9 +160,29 @@ export const commitCommand = defineCommand({
     }
 
     const toSend: Repository[] = [];
+    let previousBranchInput = "";
     for (const draft of selected) {
-      log.info(`${draft.label}: committing`);
       try {
+        const current = await currentBranch(draft.repo);
+        if (/^(main|master|principal|dev|development)$/.test(current)) {
+          if (!interactive) throw new Error("Committing on a protected branch requires a terminal to choose a branch. Changes remain staged.");
+          const answer = await text({
+            message: `${basename(draft.repo)} (${current}): branch to commit to`,
+            initialValue: previousBranchInput,
+          });
+          if (isCancel(answer)) {
+            cancel("Committing cancelled. Changes remain staged; earlier commits stay local.");
+            return;
+          }
+          previousBranchInput = answer.trim();
+          const branch = previousBranchInput || current;
+          if (branch !== current) {
+            await switchBranch(draft.repo, branch);
+            draft.label = `${basename(draft.repo)} (${branch})`;
+            draft.pendingLabel = styleText(["bold", "underline"], draft.label);
+          }
+        }
+        log.info(`${draft.label}: committing`);
         await gitCommit(draft.repo, draft.message, reportHooks(draft.label), reportNativeOutput);
         toSend.push(draft);
         log.success(`${draft.label}: committed ${draft.message}`);
@@ -187,12 +208,6 @@ export const commitCommand = defineCommand({
     }
 
     if (shouldPush) {
-      if (!interactive) {
-        log.error("Pushing requires a terminal to choose each destination branch. Commits remain local.");
-        process.exitCode = 1;
-        return;
-      }
-      let previousBranchInput = "";
       for (const { repo, label } of toSend) {
         try {
           const current = await currentBranch(repo);
@@ -204,24 +219,14 @@ export const commitCommand = defineCommand({
               log.warn(`${label}: no remote or ambiguous remote choice. Skipping push; commit remains local.`);
               continue;
             }
-            log.info(`${label}: checking unpublished commits${prefix ? ` in ${prefix}` : ""} (${remote}/${previousBranchInput || current}).`);
-            if (!await hasUnpushedCommits(repo, remote, previousBranchInput || current, reportHooks(label), prefix || undefined, reportNativeOutput)) {
+            log.info(`${label}: checking unpublished commits${prefix ? ` in ${prefix}` : ""} (${remote}/${current}).`);
+            if (!await hasUnpushedCommits(repo, remote, current, reportHooks(label), prefix || undefined, reportNativeOutput)) {
               log.info(`${label}: no unpushed commits${prefix ? ` in ${prefix}` : ""}. Skipping.`);
               continue;
             }
-            const answer = await text({
-              message: `${label}: branch to push ${publishSubtreeMode ? `${prefix} to ` : "to "}${remote}`,
-              initialValue: previousBranchInput,
-            });
-            if (isCancel(answer)) {
-              outro("Sending cancelled. Remaining commits stay local.");
-              return;
-            }
-            previousBranchInput = answer.trim();
-            const branch = previousBranchInput || current;
-            log.info(`${label}: pushing ${publishSubtreeMode ? `${prefix} → ` : ""}${remote}/${branch}`);
-            await push(repo, remote, branch, reportHooks(label), prefix || undefined, reportNativeOutput);
-            log.success(`${label}: pushed to ${remote}/${branch}`);
+            log.info(`${label}: pushing ${publishSubtreeMode ? `${prefix} → ` : ""}${remote}/${current}`);
+            await push(repo, remote, current, reportHooks(label), prefix || undefined, reportNativeOutput);
+            log.success(`${label}: pushed to ${remote}/${current}`);
           }
         } catch (error) {
           reportGitFailure(`${label}: ${publishSubtreeMode ? "publication" : "push"} failed`, error);

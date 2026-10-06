@@ -113,7 +113,7 @@ Stages all changes, scans them with Gitleaks when installed, generates Conventio
 - **Unified review:** generates messages in parallel, then presents every message with its repository name and branch. Repositories with pending changes are shown in bold and underlined when terminal styling is enabled.
 - **Actions:** commit all, commit only a named repository, edit a named repository's message, or cancel. Editing returns to the review menu.
 
-Repositories with no new changes can still send existing commits. Unselected or cancelled changes remain staged; failed or unselected commit drafts are not pushed. Push confirmation is asked once, followed by a destination input for each eligible repository or subtree.
+Repositories with no new changes can still send existing commits. Unselected or cancelled changes remain staged; failed or unselected commit drafts are not pushed. The branch is chosen before committing, never when pushing. Push confirmation is asked once.
 
 ```bash
 zapdev commit
@@ -125,7 +125,7 @@ zapdev commit
 | `--model <model>`   | Override the model                                                |
 | `--effort <effort>` | Override the reasoning effort                                     |
 | `-t, --type <type>` | Force an exact lowercase Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
-| `-p, --push`        | Skip push confirmation; still ask for each destination branch      |
+| `-p, --push`        | Skip push confirmation and push the current branch                |
 | `-s, --staged`      | Commit only changes that are already staged                       |
 | `-y, --yes`         | Skip commit review; still confirm push unless `--push` is set     |
 
@@ -133,7 +133,7 @@ zapdev commit
 zapdev commit -t feat      # force the type
 zapdev commit --staged     # leave unstaged changes untouched
 zapdev commit -y           # commit automatically, then ask before pushing
-zapdev commit -yp          # commit automatically, then enter each push destination
+zapdev commit -yp          # skip review and push confirmation; choose a branch if protected
 ```
 
 Before contacting the LLM endpoint, zapdev runs `gitleaks git --staged --verbose` in each changed repository when Gitleaks is installed. A failed scan skips that repository without sending its diff; when Gitleaks is absent, the scan is skipped. The staged diff is sent to the configured endpoint, which may be remote.
@@ -142,11 +142,11 @@ Preparation and commit failures are reported per repository while the others con
 
 In a terminal, Git and its hooks display live logs and support native prompts, even with `--yes` (which skips commit review, not native Git prompts). Git controls hook stdin; interactive hooks should read from the terminal, for example `/dev/tty`. Each hook has a 60-second deadline, including time spent answering prompts; override it with `ZD_HOOK_TIMEOUT=120 zapdev commit`.
 
-Every push asks for a destination branch, even with `--yes --push`. In both modes, prompts start empty and then reuse the previous input across repositories in this run. Press Enter to accept the prefilled name; an empty or cleared input uses the current branch and leaves the next prompt empty. Pushing to `main` is allowed in both modes. Classic pushes use the current branch's upstream remote, or the only configured remote if there is no upstream, and run `git push <remote> HEAD:refs/heads/<input>` without changing local branches or their upstreams. The destination need not exist locally. When no remote can be selected unambiguously, the repository's push is skipped with a warning, without a branch prompt. Git rejections stop the command: no rebase, merge, retry, or force-push.
+Immediately before each selected commit, zapdev asks for a local branch only when the current name exactly matches `main`, `master`, `principal`, `dev`, or `development`, including with `--yes`. The first prompt starts empty; subsequent prompts reuse the previous input across repositories. Press Enter to accept the prefilled name; an empty or cleared input keeps the current branch and leaves the next prompt empty. A different name switches to the existing local branch or creates it from HEAD, without forcing or discarding pending changes. Other branches and repositories with nothing to commit never trigger this prompt. Cancelling stops the remaining commits and all pushes; earlier commits remain local.
 
-Before each destination input, both modes check the presumed remote branch: the previous input, or the current branch when empty. If that branch is missing, the check falls back to the remote's default branch (`HEAD`). Only unpublished local commits trigger a destination input; if neither reference exists, zapdev also asks. Classic mode compares HEAD; subtree mode compares its extracted history. This check cannot anticipate a different destination you would type next. Repositories without new changes do not trigger an LLM call or a new commit.
+Pushes always target a remote branch with the current local branch's name, with no destination input. Classic pushes use the current branch's upstream remote, or the only configured remote if there is no upstream, and run `git push <remote> HEAD:refs/heads/<current-branch>`. Ambiguous remotes are skipped with a warning. Both modes check for unpublished commits against that remote branch, falling back to the remote's default branch (`HEAD`) if it is missing. If neither reference exists, publication is attempted. Classic mode compares HEAD; subtree mode compares its extracted history. Already published history is skipped. No rebase, merge, retry, or force-push.
 
-Without a TTY, zapdev commits all prepared repositories automatically but cannot push; `--push` reports an error and leaves commits local.
+Without a TTY, zapdev commits prepared repositories on nonprotected branches automatically; protected-branch commits are refused and changes remain staged. `--push` can publish without a TTY; without it, commits stay local. Repositories without new changes do not trigger an LLM call, branch prompt, or new commit.
 
 #### Subtree publication
 
@@ -167,15 +167,15 @@ Place an optional `zapdev.json` in the directory where you launch zapdev:
 
 - **Scope:** only the launch directory's file is read, not parents or child repositories. Its mapping applies to newly committed repositories and repositories without new changes.
 - **Configuration:** only `zapdev.json` selects subtree mode; no subtree CLI flag. Missing or empty `subtrees` uses classic push. Invalid configuration stops the command before staging. Replace the removed `isSubtree` option with an explicit mapping.
-- **Destinations:** only mapped folders are published, using their configured remotes; folder and remote names need not match. Each changed subtree asks for its own destination branch, initially empty, then prefilled with the previous input across repositories in this run. Press Enter to reuse it, or leave the input empty to use the current branch. `main` is allowed; detached HEAD is refused.
-- **Publication:** check the presumed destination branch using the shared unpublished-commit rule above, then run `git subtree push --prefix=<folder> <remote> <input>`. Already published history is skipped without prompting; uncommitted changes are excluded.
+- **Destinations:** only mapped folders are published, using their configured remotes; folder and remote names need not match. All subtrees use the parent repository's current branch name. The parent itself is not pushed. Detached HEAD is refused.
+- **Publication:** check each subtree using the shared unpublished-commit rule above, then run `git subtree push --prefix=<folder> <remote> <current-branch>`. Subtrees without unpublished commits are skipped without creating remote branches; uncommitted changes are excluded.
 - **Failures:** stop all remaining publications, leaving earlier publications intact. No automatic recovery.
 
-Interactive runs still ask for confirmation, including with `--yes`; `--push` skips only that confirmation, never the destination inputs. Publication requires a TTY.
+Interactive runs still ask for publication confirmation, including with `--yes`; `--push` skips that confirmation. The commit and branch-selection flow is identical to classic mode.
 
 ```bash
 zapdev commit       # with subtrees configured, ask to publish after committing
-zapdev commit -yp   # enter a destination for each changed subtree
+zapdev commit -yp   # publish changed subtrees on the parent's current branch
 ```
 
 ### `zapdev subtree-init`
@@ -202,7 +202,7 @@ zapdev subtree-init my-project \
 
 ### Zed IDE
 
-For a faster review and commit workflow, review and stage changes from Zed's Git panel, then run `zapdev commit -syp` from a task. The command commits only staged changes, skips commit review and push confirmation, then asks for the push destination.
+For a faster review and commit workflow, review and stage changes from Zed's Git panel, then run `zapdev commit -syp` from a task. The command commits only staged changes, skips commit review and push confirmation, and asks for a branch before committing only if the current branch is protected.
 
 Add the following tasks to `.zed/tasks.json`:
 

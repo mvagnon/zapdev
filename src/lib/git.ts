@@ -118,6 +118,14 @@ export async function currentBranch(repo: string): Promise<string> {
   return (await git(["symbolic-ref", "--short", "HEAD"], repo)).trim();
 }
 
+/** Switch to an existing local branch or create it from HEAD, preserving pending changes without force. */
+export async function switchBranch(repo: string, branch: string): Promise<void> {
+  await git(["check-ref-format", "--branch", branch], repo);
+  await git(["check-ref-format", `refs/heads/${branch}`], repo);
+  const exists = await tryGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], repo) !== null;
+  await git(exists ? ["switch", "--no-guess", "--", branch] : ["switch", "--no-track", "-c", branch], repo);
+}
+
 /** Read the display branch and pending changes, including untracked files. */
 export async function getRepoStatus(repo: string): Promise<{ branch: string; hasChanges: boolean }> {
   const lines = (await git(["status", "--porcelain=v2", "--branch", "--untracked-files=normal"], repo)).trim().split("\n");
@@ -144,7 +152,7 @@ export async function push(repo: string, remote: string, branch: string, onHook?
     : ["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook, onNativeOutput);
 }
 
-/** Check committed history against the presumed destination, falling back to the remote's default branch. */
+/** Check committed history against the current branch's destination, falling back to the remote's default branch. */
 export async function hasUnpushedCommits(repo: string, remote: string, branch: string, onHook?: HookReporter, prefix?: string, onNativeOutput?: NativeOutputReporter): Promise<boolean> {
   if (await tryGit(["rev-parse", "--verify", "HEAD"], repo) === null) return false;
   await git(["check-ref-format", "--branch", branch], repo);
