@@ -3,19 +3,22 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 vi.mock("@clack/prompts", () => ({
   log: { info: vi.fn(), step: vi.fn(), success: vi.fn(), error: vi.fn() },
   taskLog: vi.fn(),
+  spinner: vi.fn(),
 }));
 
-import { log, taskLog } from "@clack/prompts";
+import { log, spinner, taskLog } from "@clack/prompts";
 import { GitOutputError } from "../lib/errors";
 import { runGitTask } from "./git-task";
 
 const block = { message: vi.fn(), success: vi.fn(), error: vi.fn(), group: vi.fn() };
+const loader = { start: vi.fn(), stop: vi.fn(), error: vi.fn(), cancel: vi.fn(), message: vi.fn(), clear: vi.fn(), isCancelled: false };
 const stdinTTY = process.stdin.isTTY;
 const stdoutTTY = process.stdout.isTTY;
 
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(taskLog).mockReturnValue(block);
+  vi.mocked(spinner).mockReturnValue(loader);
   process.stdin.isTTY = true;
   process.stdout.isTTY = true;
 });
@@ -34,7 +37,8 @@ it("streams partial native output and hook statuses into one retained task log",
   });
 
   expect(success).toBe(true);
-  expect(taskLog).toHaveBeenCalledExactlyOnceWith({ title: "repo: push", limit: 10, retainLog: true });
+  expect(taskLog).toHaveBeenCalledExactlyOnceWith({ title: "repo: push: running…", limit: 10, retainLog: true });
+  expect(loader.start).toHaveBeenCalledTimes(1);
   expect(block.message.mock.calls).toEqual([
     ["Partial", { raw: true }], [" output\n", { raw: true }],
     ["repo: pre-push: completed"],
@@ -44,7 +48,10 @@ it("streams partial native output and hook statuses into one retained task log",
 });
 
 it("does not create an empty block for a silent command", async () => {
-  await expect(runGitTask("repo", "commit", "repo: committed", async () => {})).resolves.toBe(true);
+  await expect(runGitTask("repo", "commit", "repo: committed", async () => {
+    expect(loader.start).toHaveBeenCalledExactlyOnceWith("repo: commit");
+  })).resolves.toBe(true);
+  expect(loader.clear).toHaveBeenCalledTimes(1);
   expect(taskLog).not.toHaveBeenCalled();
   expect(log.success).toHaveBeenCalledExactlyOnceWith("repo: committed");
 });
@@ -69,4 +76,5 @@ it("streams stdout and stderr directly without task logs outside a terminal", as
   expect(stdout).toHaveBeenCalledWith("stdout");
   expect(stderr).toHaveBeenCalledWith("stderr");
   expect(taskLog).not.toHaveBeenCalled();
+  expect(spinner).not.toHaveBeenCalled();
 });

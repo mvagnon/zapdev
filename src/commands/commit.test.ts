@@ -563,10 +563,10 @@ it.each([true, false])("shows actual hook progress and results with TTY=%s", asy
   expect(log.success).toHaveBeenCalledWith("back (main): pre-push: completed");
   expect(log.error).toHaveBeenCalledWith("front (main): commit failed: Invalid commit message");
   expect(process.exitCode).toBe(1);
-  expect(spinner).toHaveBeenCalledTimes(interactive ? 1 : 0);
-  expect(log.step).toHaveBeenCalledWith("front (main): pre-commit");
-  expect(log.step).toHaveBeenCalledWith("front (main): commit-msg");
-  expect(log.step).toHaveBeenCalledWith("back (main): pre-push");
+  expect(spinner).toHaveBeenCalledTimes(interactive ? 4 : 0);
+  expect(log.step).toHaveBeenCalledWith("front (main): pre-commit: running…");
+  expect(log.step).toHaveBeenCalledWith("front (main): commit-msg: running…");
+  expect(log.step).toHaveBeenCalledWith("back (main): pre-push: running…");
 });
 
 it("rejects an invalid hook timeout before preparing repositories", async () => {
