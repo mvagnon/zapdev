@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/mvagnon/zapdev/compare/v1.9.0...v1.10.0) (2026-10-06)
+
+
+### Features
+
+* Update README and tests for commit options ([af2625e](https://github.com/mvagnon/zapdev/commit/af2625e8118f64ff48cf3f7c0677e9cfe2bf3d5c))
+
 ## [1.9.0](https://github.com/mvagnon/zapdev/compare/v1.8.0...v1.9.0) (2026-10-06)
 
 
