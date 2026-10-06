@@ -102,9 +102,13 @@ export async function stageAll(repo: string): Promise<void> {
   await git(["add", "-A"], repo);
 }
 
-/** Read the staged diff of the given repository. */
+/** Read staged file counts and patches together, preserving repository-relative paths and renames. */
 export async function getStagedDiff(repo: string): Promise<string> {
-  return git(["diff", "--cached"], repo);
+  return git([
+    "diff", "--cached", "--numstat", "-z", "--patch", "--find-renames", "--no-relative",
+    "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short",
+    "--src-prefix=a/", "--dst-prefix=b/", "--line-prefix=", "--unified=3",
+  ], repo);
 }
 
 /** Count staged line additions and deletions using Git's machine-readable stats. */

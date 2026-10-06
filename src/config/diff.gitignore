@@ -1,0 +1,27 @@
+# Content excluded from commit-message context. File names and counts remain visible.
+# Gitignore syntax: patterns, directories, comments, and ! exceptions.
+
+package-lock.json
+npm-shrinkwrap.json
+yarn.lock
+pnpm-lock.yaml
+bun.lock
+bun.lockb
+Cargo.lock
+composer.lock
+Gemfile.lock
+poetry.lock
+uv.lock
+Pipfile.lock
+go.sum
+
+dist/
+build/
+coverage/
+.next/
+generated/
+*.generated.*
+*.min.js
+*.min.css
+*.map
+*.tsbuildinfo

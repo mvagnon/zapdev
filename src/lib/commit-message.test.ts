@@ -2,24 +2,25 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyCommitType,
-  MAX_DIFF_CHARS,
   sanitizeCommitMessage,
-  truncateDiff,
+  validateCommitMessage,
 } from "./commit-message";
 
-describe("truncateDiff", () => {
-  it("returns the diff unchanged when under the limit", () => {
-    const diff = "small diff";
-    expect(truncateDiff(diff)).toBe(diff);
+describe("validateCommitMessage", () => {
+  it.each(["feat: add an endpoint", "deps: update packages", "feat!: remove an endpoint", "refactor(api)!: remove the old API"])("accepts %s", (message) => {
+    expect(validateCommitMessage(message)).toBeUndefined();
   });
 
-  it("truncates to the max length when over the limit", () => {
-    const diff = "x".repeat(MAX_DIFF_CHARS + 500);
-    expect(truncateDiff(diff)).toHaveLength(MAX_DIFF_CHARS);
+  it.each(["", "banana: invalid", "FEAT: invalid", "feat: ", "feat!: ", "feat!!: invalid", "feat(): invalid", "feat: first\nsecond", `feat: ${"x".repeat(67)}`])("rejects %j", (message) => {
+    expect(validateCommitMessage(message)).toEqual(expect.any(String));
   });
 
-  it("respects a custom max", () => {
-    expect(truncateDiff("abcdef", 3)).toBe("abc");
+  it("enforces the forced type without preventing automatic breaking changes", () => {
+    expect(validateCommitMessage("feat!: remove an endpoint", "feat")).toBeUndefined();
+    expect(validateCommitMessage("feat(api)!: remove an endpoint", "feat!")).toBeUndefined();
+    expect(validateCommitMessage("fix: repair an endpoint", "feat")).toEqual(expect.any(String));
+    expect(validateCommitMessage("feat: add an endpoint", "feat!")).toEqual(expect.any(String));
+    expect(validateCommitMessage(`feat: ${"x".repeat(66)}`)).toBeUndefined();
   });
 });
 

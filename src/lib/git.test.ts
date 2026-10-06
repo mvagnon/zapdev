@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -9,6 +9,7 @@ import { x } from "tinyexec";
 
 import { commit, currentBranch, findRepos, getPushRemote, getUpstreamRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, push, stageAll, switchBranch } from "./git";
 import type { HookEvent } from "../types/git";
+import { prepareCommitContext } from "./commit-context";
 
 const exec = promisify(execFile);
 let root: string;
@@ -89,6 +90,26 @@ it("sums staged line additions and deletions, ignoring binaries and unstaged cha
   await writeFile(join(root, "file.txt"), "unstaged content\n");
 
   await expect(getStagedDiffStats(root)).resolves.toEqual({ additions: 5, deletions: 1 });
+});
+
+it("builds commit context from real Git output with renames, unusual paths, ignored files and binaries", async () => {
+  await configureHooks();
+  await commit(root, "chore: initial");
+  const path = "new\tfile\nété.txt";
+  await rename(join(root, "file.txt"), join(root, path));
+  await writeFile(join(root, "package-lock.json"), "LOCKFILE_NOISE\n");
+  await writeFile(join(root, "package.json"), '{"dependencies":{"foo":"2"}}\n');
+  await writeFile(join(root, "binary.bin"), Buffer.from([0, 1, 2]));
+  await stageAll(root);
+  await git(["config", "diff.noprefix", "true"], root);
+  await git(["config", "diff.submodule", "log"], root);
+
+  const context = prepareCommitContext(await getStagedDiff(join(root, "hooks")), "package-lock.json");
+  expect(context).toContain(`${JSON.stringify("file.txt")} -> ${JSON.stringify(path)}`);
+  expect(context).toContain('+1 -0 "package-lock.json" (new) (content omitted)');
+  expect(context).toContain('binary "binary.bin" (new) (content omitted)');
+  expect(context).toContain('"dependencies"');
+  expect(context).not.toContain("LOCKFILE_NOISE");
 });
 
 it("reports branches and pending changes for unborn, staged, unstaged and detached states", async () => {

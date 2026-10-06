@@ -144,6 +144,10 @@ zapdev commit --pull       # pull first, then follow the normal commit flow
 
 Supported types: `feat`, `fix`, `deps`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`, each also available with `!`. Breaking changes use `feat!: description` or `feat(scope)!: description`, compatible with Release Please.
 
+The model can choose `!` automatically when the diff demonstrates a breaking change, including with a forced base type such as `--type feat`. Generated and edited messages must use a supported type, valid header and at most 72 characters. Invalid generated messages get one correction attempt; API and network errors are not retried.
+
+Commit context includes every changed file's name and line counts. Binary content and files matching `src/config/diff.gitignore` are omitted, not excluded from staging or committing. Patterns use gitignore syntax, including `!` exceptions, and are bundled at build time; edit this file and rebuild to change the defaults. Dependency manifests remain visible by default. A 12,000-character budget is shared across the remaining patches, keeping both ends of large patches; if the inventory alone exceeds it, stage fewer files.
+
 Before contacting the LLM endpoint, zapdev runs `gitleaks git --staged --verbose` in each changed repository when Gitleaks is installed. A failed scan never sends that repository's diff to the LLM and stops the flow before any commit; when Gitleaks is absent, the scan is skipped. The staged diff is sent to the configured endpoint, which may be remote.
 
 Any error stops the flow with a nonzero exit code. Parallel work already in flight finishes before exiting; later steps never start. Earlier successful pulls or commits remain applied.

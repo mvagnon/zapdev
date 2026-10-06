@@ -1,7 +1,8 @@
-import { COMMIT_SYSTEM_PROMPT } from "../prompts";
+import { COMMIT_DIFF_IGNORE_PATTERNS, COMMIT_SYSTEM_PROMPT } from "../prompts";
 import type { CommitType } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
-import { applyCommitType, sanitizeCommitMessage, truncateDiff } from "./commit-message";
+import { prepareCommitContext } from "./commit-context";
+import { applyCommitType, sanitizeCommitMessage, validateCommitMessage } from "./commit-message";
 
 const REQUEST_TIMEOUT_MS = 25_000;
 
@@ -12,42 +13,53 @@ export async function generateCommitMessage(
   type?: CommitType,
 ): Promise<string> {
   const systemPrompt = type ? applyCommitType(COMMIT_SYSTEM_PROMPT, type) : COMMIT_SYSTEM_PROMPT;
-  const messages = [
+  const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: truncateDiff(diff) },
+    { role: "user", content: prepareCommitContext(diff, COMMIT_DIFF_IGNORE_PATTERNS) },
   ];
 
-  let response: Response;
-  let body: unknown;
-  try {
-    response = await fetch(config.url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: config.model,
-        stream: false,
-        reasoning_effort: config.effort,
-        messages,
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    const text = await response.text();
+  let validationError = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response: Response;
+    let body: unknown;
     try {
-      body = JSON.parse(text);
-    } catch {
-      body = null;
+      response = await fetch(config.url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: config.model,
+          stream: false,
+          reasoning_effort: config.effort,
+          messages,
+        }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      const text = await response.text();
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = null;
+      }
+    } catch (error) {
+      throw new Error(describeRequestError(error), { cause: error });
     }
-  } catch (error) {
-    throw new Error(describeRequestError(error), { cause: error });
-  }
 
-  if (!response.ok) {
-    throw new Error(`LLM error: ${serverError(body) ?? `HTTP ${response.status}`}`);
-  }
+    if (!response.ok) {
+      throw new Error(`LLM error: ${serverError(body) ?? `HTTP ${response.status}`}`);
+    }
 
-  const content = messageContent(body);
-  if (content === null) throw new Error("LLM returned an unexpected response shape.");
-  return sanitizeCommitMessage(content);
+    const content = messageContent(body);
+    if (content === null) throw new Error("LLM returned an unexpected response shape.");
+    const message = sanitizeCommitMessage(content);
+    const error = validateCommitMessage(message, type);
+    if (!error) return message;
+    validationError = error;
+    messages.push(
+      { role: "assistant", content: message.slice(0, 200) },
+      { role: "user", content: `Invalid commit message: ${error} Return only a corrected commit message for the same changes.` },
+    );
+  }
+  throw new Error(`LLM returned an invalid commit message after two attempts: ${validationError}`);
 }
 
 function describeRequestError(error: unknown): string {

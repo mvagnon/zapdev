@@ -434,6 +434,10 @@ it("edits one repo, then commits only that repo with its edited message", async 
   }));
   expect(text).toHaveBeenCalledWith(expect.objectContaining({ message: 'Edit message for "back (main)"' }));
   expect(text).toHaveBeenCalledTimes(2);
+  const validate = vi.mocked(text).mock.calls[0]![0].validate!;
+  if (typeof validate !== "function") throw new Error("Expected a validation function.");
+  expect(validate("banana: invalid")).toEqual(expect.any(String));
+  expect(validate("feat(api)!: remove the old endpoint")).toBeUndefined();
   expect(text).toHaveBeenLastCalledWith(expect.objectContaining({ message: "back (main): branch to commit to" }));
   expect(git.push).not.toHaveBeenCalled();
 });

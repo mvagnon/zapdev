@@ -14,6 +14,7 @@ import {
 } from "@clack/prompts";
 
 import { resolveConfig, resolveHookTimeout } from "../lib/config";
+import { validateCommitMessage } from "../lib/commit-message";
 import {
   commit as gitCommit,
   currentBranch,
@@ -31,7 +32,7 @@ import {
 import { errorMessage } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
-import { COMMIT_TYPES } from "../types/commit";
+import { COMMIT_TYPES, type CommitType } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 import type { DiffStats } from "../types/git";
 import { runTask } from "./git-task";
@@ -172,7 +173,7 @@ export const commitCommand = defineCommand({
         }
       }
 
-      const selected = drafts.length ? await reviewMessages(drafts, interactive && !args.yes) : [];
+      const selected = drafts.length ? await reviewMessages(drafts, interactive && !args.yes, args.type) : [];
       if (!selected) {
         cancel("Cancelled (changes left staged).");
         return;
@@ -248,7 +249,7 @@ export const commitCommand = defineCommand({
   },
 });
 
-async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean): Promise<CommitDraft[] | null> {
+async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean, type?: CommitType): Promise<CommitDraft[] | null> {
   while (true) {
     for (const [index, { stats, pendingLabel, message }] of drafts.entries()) {
       log.message(`(${styleText("green", `+${stats.additions}`)} ${styleText("red", `-${stats.deletions}`)}) ${pendingLabel}: ${message}`, { spacing: index === 0 ? 1 : 0 });
@@ -278,7 +279,7 @@ async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean): Promis
     const edited = await text({
       message: `Edit message for "${action.draft.pendingLabel}"`,
       initialValue: action.draft.message,
-      validate: (value) => value?.trim() ? undefined : "Message cannot be empty.",
+      validate: (value) => validateCommitMessage(value?.trim() ?? "", type),
     });
     if (isCancel(edited)) return null;
     action.draft.message = edited.trim();
