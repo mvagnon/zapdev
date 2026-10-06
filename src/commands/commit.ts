@@ -15,7 +15,7 @@ import {
 } from "@clack/prompts";
 
 import { normalizeCommitType } from "../lib/commit-message";
-import { resolveConfig, resolveHookTimeout } from "../lib/config";
+import { resolveConfig, resolveHookTimeout, resolvePublishSubtree } from "../lib/config";
 import {
   behindCount,
   commit as gitCommit,
@@ -27,6 +27,7 @@ import {
   hasUpstream,
   pullMerge,
   pullRebase,
+  publishSubtree,
   push,
   pushSetUpstream,
   stageAll,
@@ -72,7 +73,11 @@ export const commitCommand = defineCommand({
     push: {
       type: "boolean",
       alias: "p",
-      description: "Push after committing without asking.",
+      description: "Push or publish subtrees after committing without asking.",
+    },
+    "publish-subtree": {
+      type: "boolean",
+      description: "Publish projet-front and projet-back; use --publish-subtree=false to force classic push.",
     },
     staged: {
       type: "boolean",
@@ -120,6 +125,7 @@ export const commitCommand = defineCommand({
     }
 
     let config: ZapdevConfig;
+    let publishSubtreeMode: boolean;
     try {
       resolveHookTimeout();
       config = resolveConfig(process.env, {
@@ -127,6 +133,7 @@ export const commitCommand = defineCommand({
         model: args.model,
         effort: args.effort,
       });
+      publishSubtreeMode = await resolvePublishSubtree(process.cwd(), args["publish-subtree"]);
     } catch (error) {
       log.error(errorMessage(error));
       process.exitCode = 1;
@@ -210,11 +217,11 @@ export const commitCommand = defineCommand({
     let shouldPush = Boolean(args.push);
     if (!shouldPush && interactive && !args.yes) {
       const answer = await confirm({
-        message: `Push ${committed.map(({ label }) => label).join(", ")}?`,
+        message: `${publishSubtreeMode ? "Publish subtrees in" : "Push"} ${committed.map(({ label }) => label).join(", ")}?`,
         initialValue: false,
       });
       if (isCancel(answer)) {
-        outro("Committed. Not pushed.");
+        outro(publishSubtreeMode ? "Committed. Not published." : "Committed. Not pushed.");
         return;
       }
       shouldPush = answer;
@@ -223,14 +230,14 @@ export const commitCommand = defineCommand({
     if (shouldPush) {
       for (const repository of committed) {
         try {
-          const pushed = await pushOptimistic(
+          const pushed = publishSubtreeMode ? await publishSubtrees(repository) : await pushOptimistic(
             repository,
             interactive && !args.yes,
             syncStrategy,
           );
           if (!pushed) process.exitCode = 1;
         } catch (error) {
-          reportGitFailure(`${repository.label}: push failed`, error);
+          reportGitFailure(`${repository.label}: ${publishSubtreeMode ? "publication" : "push"} failed`, error);
           process.exitCode = 1;
         }
       }
@@ -308,6 +315,22 @@ async function syncWithUpstream(
     reportGitFailure(`${label}: ${actionLabel} failed (resolve conflicts, then push)`, error);
     return false;
   }
+}
+
+async function publishSubtrees({ repo, label }: Repository): Promise<boolean> {
+  const branch = await currentBranch(repo);
+  for (const remote of ["front", "back"]) {
+    log.info(`${label}: publishing projet-${remote} → ${remote}/${branch}`);
+    try {
+      const published = await publishSubtree(repo, remote, branch, reportHooks(label));
+      if (published) log.success(`${label}: published projet-${remote} → ${remote}/${branch}`);
+      else log.info(`${label}: no changes in projet-${remote}. Skipping.`);
+    } catch (error) {
+      reportGitFailure(`${label}: publication to ${remote}/${branch} failed`, error);
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Push optimistically, recovering a behind-upstream rejection once. */

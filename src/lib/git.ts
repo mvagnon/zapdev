@@ -137,6 +137,18 @@ export async function pushSetUpstream(repo: string, branch: string, onHook?: Hoo
   await git(["push", "--quiet", "-u", "origin", branch], repo, onHook);
 }
 
+/** Publish committed projet-<remote> contents unless identical to remote/main; never force-push. */
+export async function publishSubtree(repo: string, remote: string, branch: string, onHook?: HookReporter): Promise<boolean> {
+  if (branch === "main") throw new Error("Refusing to publish directly to main.");
+  await git(["check-ref-format", "--branch", branch], repo);
+  await git(["fetch", "--quiet", remote, "main"], repo, onHook);
+  const split = (await git(["subtree", "split", "--quiet", `--prefix=projet-${remote}`], repo)).trim();
+  const changes = await git(["diff", "--name-only", "FETCH_HEAD", split, "--"], repo);
+  if (!changes.trim()) return false;
+  await git(["push", "--quiet", remote, `${split}:refs/heads/${branch}`], repo, onHook);
+  return true;
+}
+
 /** Rebase the current branch on its upstream. */
 export async function pullRebase(repo: string, onHook?: HookReporter): Promise<void> {
   await git(["pull", "--quiet", "--rebase"], repo, onHook);

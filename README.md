@@ -125,7 +125,9 @@ zapdev commit
 | `--model <model>`   | Override the model                                                |
 | `--effort <effort>` | Override the reasoning effort                                     |
 | `-t, --type <type>` | Force the Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
-| `-p, --push`        | Push after committing without asking                              |
+| `-p, --push`        | Push or publish subtrees after committing without asking           |
+| `--publish-subtree` | Publish subtrees instead of using the classic push                |
+| `--publish-subtree=false` | Force classic push, overriding `zapdev.json`                |
 | `-s, --staged`      | Commit only changes that are already staged                       |
 | `-r, --rebase`      | Rebase on upstream if the push is rejected                        |
 | `-m, --merge`       | Merge upstream if the push is rejected                            |
@@ -145,6 +147,32 @@ In a terminal, Git and its hooks display live logs and support native prompts, e
 Pushing is optimistic, with no preliminary fetch. If the branch is behind upstream, `--rebase` runs `git pull --rebase`, while `--merge` runs `git pull --no-rebase --no-edit`; zapdev then retries once. Without either flag, interactive runs ask whether to rebase, merge, or quit. Runs using `--yes` or without a TTY must provide one of the flags.
 
 Without a TTY, zapdev commits all prepared repositories automatically and only pushes when `--push` is set.
+
+#### Subtree publication
+
+Place an optional `zapdev.json` in the directory where you launch zapdev:
+
+```json
+{ "isSubtree": true }
+```
+
+| `zapdev.json` option | Default | Effect |
+| ------------------- | ------- | ------ |
+| `isSubtree` | `false` | Replace classic push with subtree publication when `true`; must be a boolean. |
+
+- **Scope:** only the launch directory's file is read, not parents or child repositories. Its setting applies to all successfully committed repositories.
+- **Priority:** explicit `--publish-subtree` / `--publish-subtree=false` overrides the file. Without a flag, invalid configuration stops the command before staging.
+- **Destinations:** `projet-front` → remote `front`, `projet-back` → remote `back`, both using the current branch name. `main` and detached HEAD are refused.
+- **Publication:** fetch each remote's `main`, split committed contents, skip contents identical to `main`, then push without force. Uncommitted changes are excluded.
+- **Failures:** stop that repository's publication, leaving earlier publications intact; other repositories continue. No automatic rebase/merge recovery.
+
+Interactive runs still ask for confirmation; `--push` publishes without asking. `--yes` alone does not publish.
+
+```bash
+zapdev commit --publish-subtree        # ask to publish after committing
+zapdev commit --publish-subtree -yp    # publish without zapdev prompts
+zapdev commit --publish-subtree=false -yp # force classic push
+```
 
 ### Zed IDE
 

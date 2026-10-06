@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { x } from "tinyexec";
 
-import { commit, findRepos, getRepoStatus, getStagedDiff, push, stageAll } from "./git";
+import { commit, findRepos, getRepoStatus, getStagedDiff, publishSubtree, push, stageAll } from "./git";
 import type { HookEvent } from "../types/git";
 
 const exec = promisify(execFile);
@@ -248,4 +248,56 @@ it("reports an actual pre-push hook and its exit code", async () => {
     { name: "pre-push", phase: "start" },
     { name: "pre-push", phase: "exit", exitCode: 5 },
   ]);
+});
+
+async function initSubtrees(): Promise<void> {
+  await configureHooks();
+  await commit(root, "chore: initial");
+  await exec("git", ["checkout", "--quiet", "-b", "feature/publish"], { cwd: root });
+  for (const remote of ["front", "back"]) {
+    const source = await initRepo(join(root, `source-${remote}`));
+    await exec("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: source });
+    await writeFile(join(source, "file.txt"), remote);
+    await stageAll(source);
+    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "initial"], { cwd: source });
+    await exec("git", ["remote", "add", remote, source], { cwd: root });
+    await exec("git", ["subtree", "add", `--prefix=projet-${remote}`, remote, "main", "--squash"], { cwd: root });
+  }
+}
+
+it("publishes only committed subtree contents, skips unchanged subtrees and preserves hooks", async () => {
+  await initSubtrees();
+  await writeFile(join(root, "projet-front", "file.txt"), "published change");
+  await exec("git", ["add", "projet-front/file.txt"], { cwd: root });
+  await commit(root, "feat: front change");
+  await writeFile(join(root, "projet-front", "file.txt"), "uncommitted change");
+  await writeFile(join(root, "hooks", "pre-push"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const events: HookEvent[] = [];
+
+  await expect(publishSubtree(root, "front", "feature/publish", (event) => events.push(event))).resolves.toBe(true);
+  await expect(publishSubtree(root, "back", "feature/publish")).resolves.toBe(false);
+  const source = join(root, "source-front");
+  const published = await exec("git", ["show", "feature/publish:file.txt"], { cwd: source });
+  expect(published.stdout).toBe("published change");
+  const files = await exec("git", ["ls-tree", "--name-only", "feature/publish"], { cwd: source });
+  expect(files.stdout.trim()).toBe("file.txt");
+  await expect(exec("git", ["rev-parse", "--verify", "feature/publish"], { cwd: join(root, "source-back") })).rejects.toThrow();
+  expect(events).toContainEqual({ name: "pre-push", phase: "exit", exitCode: 0 });
+
+  await exec("git", ["branch", "--force", "feature/publish", "main"], { cwd: source });
+  await exec("git", ["checkout", "--quiet", "feature/publish"], { cwd: source });
+  await writeFile(join(source, "file.txt"), "remote-only change");
+  await stageAll(source);
+  await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "diverging change"], { cwd: source });
+  const beforePush = await exec("git", ["rev-parse", "feature/publish"], { cwd: source });
+  await exec("git", ["checkout", "--quiet", "main"], { cwd: source });
+  await expect(publishSubtree(root, "front", "feature/publish")).rejects.toThrow();
+  const remoteHead = await exec("git", ["rev-parse", "feature/publish"], { cwd: source });
+  expect(remoteHead.stdout).toBe(beforePush.stdout);
+}, 15_000);
+
+it("refuses main and invalid branch names before fetching", async () => {
+  await initRepo(root);
+  await expect(publishSubtree(root, "front", "main")).rejects.toThrow("Refusing to publish directly to main");
+  await expect(publishSubtree(root, "front", "invalid..branch")).rejects.toThrow("valid branch");
 });

@@ -1,4 +1,34 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+import { errorMessage } from "./errors";
 import type { ZapdevConfig } from "../types/config";
+
+/** Choose subtree publication from an explicit flag or zapdev.json in the launch directory. */
+export async function resolvePublishSubtree(directory: string, override?: boolean): Promise<boolean> {
+  if (override !== undefined) return override;
+  let content: string;
+  try {
+    content = await readFile(join(directory, "zapdev.json"), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw new Error(`Unable to read zapdev.json: ${errorMessage(error)}`, { cause: error });
+  }
+  let config: unknown;
+  try {
+    config = JSON.parse(content);
+  } catch (error) {
+    throw new Error("zapdev.json must contain valid JSON.", { cause: error });
+  }
+  if (typeof config !== "object" || config === null || Array.isArray(config)) {
+    throw new Error("zapdev.json must contain an object.");
+  }
+  const isSubtree = (config as Record<string, unknown>).isSubtree;
+  if (isSubtree !== undefined && typeof isSubtree !== "boolean") {
+    throw new Error("zapdev.json isSubtree must be a boolean.");
+  }
+  return isSubtree === true;
+}
 
 /** Resolve the per-hook deadline in milliseconds from ZD_HOOK_TIMEOUT (seconds). */
 export function resolveHookTimeout(env: Record<string, string | undefined> = process.env): number {

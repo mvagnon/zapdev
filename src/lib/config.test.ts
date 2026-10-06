@@ -1,8 +1,47 @@
-import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { resolveConfig, resolveHookTimeout } from "./config";
+import { resolveConfig, resolveHookTimeout, resolvePublishSubtree } from "./config";
 
 const env = { ZD_URL: "http://localhost:1234/v1/chat/completions", ZD_MODEL: "my-model", ZD_EFFORT: "low" };
+
+describe("resolvePublishSubtree", () => {
+  let directory: string;
+  beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), "zapdev-config-")); });
+  afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
+
+  it("defaults to classic push and only reads zapdev.json in the launch directory", async () => {
+    await expect(resolvePublishSubtree(directory)).resolves.toBe(false);
+    await writeFile(join(directory, "zapdev.json"), '{"isSubtree":true}');
+    await expect(resolvePublishSubtree(directory)).resolves.toBe(true);
+    const child = join(directory, "child");
+    await mkdir(child);
+    await expect(resolvePublishSubtree(child)).resolves.toBe(false);
+  });
+
+  it.each([true, false])("gives an explicit flag (%s) priority over the file", async (override) => {
+    await writeFile(join(directory, "zapdev.json"), JSON.stringify({ isSubtree: !override }));
+    await expect(resolvePublishSubtree(directory, override)).resolves.toBe(override);
+  });
+
+  it.each([{}, { isSubtree: false }])("accepts optional or false isSubtree: %j", async (config) => {
+    await writeFile(join(directory, "zapdev.json"), JSON.stringify(config));
+    await expect(resolvePublishSubtree(directory)).resolves.toBe(false);
+  });
+
+  it.each(['{', 'null', '[]', '{"isSubtree":"true"}', '{"isSubtree":1}', '{"isSubtree":null}'])(
+    "rejects invalid configuration before choosing a push mode: %s", async (content) => {
+      await writeFile(join(directory, "zapdev.json"), content);
+      await expect(resolvePublishSubtree(directory)).rejects.toThrow("zapdev.json");
+    });
+
+  it("does not treat unreadable configuration as a missing file", async () => {
+    await mkdir(join(directory, "zapdev.json"));
+    await expect(resolvePublishSubtree(directory)).rejects.toThrow("Unable to read zapdev.json");
+  });
+});
 
 it("defaults hook deadlines to 60 seconds and accepts a valid environment override", () => {
   expect(resolveHookTimeout({})).toBe(60_000);
