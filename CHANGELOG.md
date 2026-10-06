@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/mvagnon/zapdev/compare/v1.14.0...v1.15.0) (2026-10-06)
+
+
+### Features
+
+* Enhance git task logging with better feedback during execution ([4ab2c10](https://github.com/mvagnon/zapdev/commit/4ab2c104e04651359a48cb8e24abb76e5a6ec5f4))
+
 ## [1.14.0](https://github.com/mvagnon/zapdev/compare/v1.13.0...v1.14.0) (2026-10-06)
 
 
