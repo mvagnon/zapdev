@@ -532,16 +532,47 @@ it("warns and skips an unresolved remote, then sends the next repo's current bra
   expect(process.exitCode).toBeUndefined();
 });
 
-it("stops all remaining sends after Git rejects a push", async () => {
-  vi.mocked(git.push).mockRejectedValueOnce(new Error("non-fast-forward"));
+it.each([undefined, new Error("non-fast-forward"), new GitOutputError("Native Git diagnostic")])("pushes concurrently and waits for every push before reporting the result: %s", async (error) => {
+  const pushing: (() => void)[] = [];
+  let completedPushes = 0;
+  let errorsBeforeLastPush = -1;
+  let exitCodeBeforeLastPush: typeof process.exitCode;
+  vi.mocked(git.push).mockImplementation((repo) => new Promise((resolve, reject) => {
+    pushing.push(() => {
+      completedPushes++;
+      if (repo === repos[0] && error) reject(error);
+      else resolve();
+    });
+    if (pushing.length === repos.length) {
+      pushing[0]!();
+      setImmediate(() => {
+        errorsBeforeLastPush = vi.mocked(log.error).mock.calls.length;
+        exitCodeBeforeLastPush = process.exitCode;
+        pushing[1]!();
+      });
+    }
+  }));
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
 
-  expect(git.push).toHaveBeenCalledTimes(1);
+  expect(git.push).toHaveBeenCalledTimes(repos.length);
+  expect(completedPushes).toBe(repos.length);
+  expect(errorsBeforeLastPush).toBe(0);
+  expect(exitCodeBeforeLastPush).toBeUndefined();
   expect(text).toHaveBeenCalledTimes(2);
   expect(select).not.toHaveBeenCalled();
-  expect(process.exitCode).toBe(1);
-});
+  const loader = vi.mocked(spinner).mock.results.at(-1)!.value;
+  expect(loader.start).toHaveBeenCalledExactlyOnceWith("Pushing repositories in parallel");
+  if (error) {
+    expect(log.error).toHaveBeenCalledExactlyOnceWith(`Pushing repositories in parallel failed: front (main): ${error.message}`, { spacing: 0 });
+    expect(loader.stop).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  } else {
+    expect(log.error).not.toHaveBeenCalled();
+    expect(loader.stop).toHaveBeenCalledExactlyOnceWith("Repositories pushed");
+    expect(process.exitCode).toBeUndefined();
+  }
+}, 1_000);
 
 it("stops before committing or sending when a branch input is cancelled", async () => {
   vi.mocked(text).mockResolvedValue(Symbol("cancel"));
@@ -591,7 +622,10 @@ it.each(["commit", "push"])("reports captured native Git diagnostics once during
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
 
-  expect(log.error).toHaveBeenCalledExactlyOnceWith(`front (main): ${operation} failed: Native Git diagnostic`, { spacing: 0 });
+  const message = operation === "commit"
+    ? "front (main): commit failed: Native Git diagnostic"
+    : "Pushing repositories in parallel failed: front (main): Native Git diagnostic";
+  expect(log.error).toHaveBeenCalledExactlyOnceWith(message, { spacing: 0 });
   const messages = [...vi.mocked(log.error).mock.calls, ...vi.mocked(log.warn).mock.calls].map(([message]) => message);
   expect(messages.join("\n").match(/Native Git diagnostic/g)).toHaveLength(1);
   expect(process.exitCode).toBe(1);
@@ -649,7 +683,7 @@ it.each([true, false])("uses one start and stop per step without hook or task lo
 
   expect(log.error).not.toHaveBeenCalled();
   expect(process.exitCode).toBeUndefined();
-  expect(spinner).toHaveBeenCalledTimes(interactive ? 5 : 0);
+  expect(spinner).toHaveBeenCalledTimes(interactive ? 4 : 0);
   for (const result of vi.mocked(spinner).mock.results) {
     expect(result.value.start).toHaveBeenCalledTimes(1);
     expect(result.value.stop).toHaveBeenCalledTimes(1);
@@ -672,7 +706,6 @@ it.each(["", "   ", "feature/new"])("spaces steps once and keeps preparation and
     [{ withGuide: true }],
     [{ withGuide: Boolean(branch.trim()) }],
     [{ withGuide: Boolean(branch.trim()) }],
-    [{ withGuide: true }],
     [{ withGuide: true }],
   ]);
 });

@@ -229,11 +229,14 @@ export const commitCommand = defineCommand({
         shouldPush = answer;
       }
 
-      if (shouldPush) {
-        for (const { repo, label, branch, remote } of destinations) {
-          await runTask(`${label}: push`, `${label}: pushed to ${remote}/${branch}`, (onOutput) =>
-            push(repo, remote, branch, undefined, onOutput));
-        }
+      if (shouldPush && destinations.length) {
+        await runTask("Pushing repositories in parallel", "Repositories pushed", async (onOutput) => {
+          const results = await Promise.allSettled(destinations.map(({ repo, branch, remote }) =>
+            push(repo, remote, branch, undefined, onOutput)));
+          for (const [index, result] of results.entries()) {
+            if (result.status === "rejected") throw new Error(`${destinations[index]!.label}: ${errorMessage(result.reason)}`);
+          }
+        });
       }
 
       if (interactive) outro("Done.");
