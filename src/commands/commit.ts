@@ -71,6 +71,7 @@ export const commitCommand = defineCommand({
       type: "boolean",
       alias: "p",
       description: "Skip push confirmation and push the current branch.",
+      negativeDescription: "Keep commits local without push confirmation.",
     },
     pull: {
       type: "boolean",
@@ -206,7 +207,7 @@ export const commitCommand = defineCommand({
         toSend.push(draft);
       }
       if (toSend.length === 0) return;
-      if (!interactive && !args.push) return;
+      if (args.push === false || (!interactive && !args.push)) return;
 
       const destinations: { repo: string; label: string; branch: string; remote: string }[] = [];
       for (const { repo, label } of toSend) {

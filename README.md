@@ -127,6 +127,7 @@ zapdev commit
 | `--effort <effort>` | Override the reasoning effort                                                    |
 | `-t, --type <type>` | Force an exact lowercase Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
 | `-p, --push`        | Skip push confirmation and push the current branch                               |
+| `--no-push`, `--push=false` | Keep commits local without push confirmation                            |
 | `--pull`           | Pull fast-forward updates only in repositories with changes to commit and an upstream remote |
 | `-s, --staged`      | Commit only changes that are already staged                                      |
 | `-y, --yes`         | Skip commit review; still confirm push unless `--push` is set                    |

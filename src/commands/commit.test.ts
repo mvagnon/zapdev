@@ -368,6 +368,18 @@ it("skips commit review with --yes but confirms sending", async () => {
   expect(git.push).toHaveBeenCalledTimes(2);
 });
 
+it.each(["--push=false", "--no-push"])("keeps commits local without push confirmation with %s", async (flag) => {
+  vi.mocked(confirm).mockResolvedValue(true);
+
+  await runCommand(commitCommand, { rawArgs: ["--yes", flag] });
+
+  expect(git.commit).toHaveBeenCalledTimes(2);
+  expect(git.getPushRemote).not.toHaveBeenCalled();
+  expect(confirm).not.toHaveBeenCalled();
+  expect(git.push).not.toHaveBeenCalled();
+  expect(process.exitCode).toBeUndefined();
+});
+
 it.each([false, Symbol("cancel")])("keeps --yes commits local when push is declined or cancelled: %s", async (answer) => {
   vi.mocked(confirm).mockResolvedValue(answer);
   await runCommand(commitCommand, { rawArgs: ["-y"] });
