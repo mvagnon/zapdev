@@ -2,10 +2,10 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 
 import { errorMessage } from "./errors";
-import type { SubtreeMapping, ZapdevConfig } from "../types/config";
+import type { ProjectConfig, SubtreeMapping, ZapdevConfig } from "../types/config";
 
-/** Read and validate the subtree mapping in the launch directory's zapdev.json. */
-export async function resolveSubtrees(directory: string): Promise<SubtreeMapping> {
+/** Read project settings and validate their subtree mapping without discarding other options. */
+export async function readProjectConfig(directory: string): Promise<ProjectConfig> {
   let content: string;
   try {
     content = await readFile(join(directory, "zapdev.json"), "utf8");
@@ -27,7 +27,7 @@ export async function resolveSubtrees(directory: string): Promise<SubtreeMapping
     throw new Error("zapdev.json isSubtree is no longer supported; use a subtrees folder-to-remote mapping.");
   }
   const subtrees = settings.subtrees;
-  if (subtrees === undefined) return {};
+  if (subtrees === undefined) return settings as ProjectConfig;
   if (typeof subtrees !== "object" || subtrees === null || Array.isArray(subtrees)) {
     throw new Error("zapdev.json subtrees must be a folder-to-remote object.");
   }
@@ -40,7 +40,12 @@ export async function resolveSubtrees(directory: string): Promise<SubtreeMapping
       throw new Error(`zapdev.json subtree "${prefix}" must map to a nonempty Git remote name.`);
     }
   }
-  return subtrees as SubtreeMapping;
+  return settings as ProjectConfig;
+}
+
+/** Read the subtree mapping in the launch directory's zapdev.json. */
+export async function resolveSubtrees(directory: string): Promise<SubtreeMapping> {
+  return (await readProjectConfig(directory)).subtrees ?? {};
 }
 
 /** Resolve the per-hook deadline in milliseconds from ZD_HOOK_TIMEOUT (seconds). */

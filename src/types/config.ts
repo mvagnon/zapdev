@@ -7,3 +7,6 @@ export type ZapdevConfig = {
 
 /** Repository-relative subtree folders mapped to their Git remote names. */
 export type SubtreeMapping = Record<string, string>;
+
+/** Project settings preserved when updating the subtree mapping. */
+export type ProjectConfig = { subtrees?: SubtreeMapping; [key: string]: unknown };

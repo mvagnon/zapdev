@@ -166,7 +166,7 @@ Place an optional `zapdev.json` in the directory where you launch zapdev:
 - **Scope:** only the launch directory's file is read, not parents or child repositories. Its setting applies to all successfully committed repositories.
 - **Configuration:** only `zapdev.json` selects subtree mode; no subtree CLI flag. Missing or empty `subtrees` uses classic push. Invalid configuration stops the command before staging. Replace the removed `isSubtree` option with an explicit mapping.
 - **Destinations:** only mapped folders are published, using their configured remotes; folder and remote names need not match. Each changed subtree asks for its own destination branch, prefilled with the previous answer across repositories in this run (current branch for the first prompt). Press Enter to reuse it. `main` and detached HEAD are refused.
-- **Publication:** fetch each remote's `main`, skip committed contents identical to `main` without prompting, then run `git subtree push --prefix=<folder> <remote> <input>`. Uncommitted changes are excluded.
+- **Publication:** fetch each remote's default branch (`HEAD`), skip identical committed contents without prompting, then run `git subtree push --prefix=<folder> <remote> <input>`. Uncommitted changes are excluded.
 - **Failures:** stop all remaining publications, leaving earlier publications intact. No automatic recovery.
 
 Interactive runs still ask for confirmation, including with `--yes`; `--push` skips only that confirmation, never the destination inputs. Publication requires a TTY.
@@ -175,6 +175,28 @@ Interactive runs still ask for confirmation, including with `--yes`; `--push` sk
 zapdev commit       # with subtrees configured, ask to publish after committing
 zapdev commit -yp   # enter a destination for each changed subtree
 ```
+
+### `zapdev subtree-init`
+
+Create or extend a repository with squashed subtrees, named remotes, and the matching `zapdev.json`. No gum or LLM configuration required.
+
+```bash
+zapdev subtree-init my-project \
+  front=git@github.com:org/front.git \
+  back=git@github.com:org/back.git \
+  --origin git@github.com:org/project.git
+```
+
+| Parameter | Effect |
+| --------- | ------ |
+| `<directory>` | Repository to create or extend. New repositories start on `main`; existing branches are kept. |
+| `<name=url>...` | One or more sources. Each name is both the subtree folder and its Git remote name. |
+| `--origin <url>` | Optional parent repository remote; replaces the shell helper's `remote=url` argument. |
+
+- Requires a clean working tree, including untracked files. Existing folders, conflicting mappings or remote URLs, and a symlinked `zapdev.json` are refused before importing any subtree.
+- Detects each source's default branch, falling back to `main` with a warning when unavailable; imports with `git subtree add --squash`.
+- Commits the explicit folder-to-remote mapping before imports, preserving existing mappings and other JSON settings. Example: `{"subtrees":{"front":"front","back":"back"}}`.
+- Does not push. Git failures stop immediately without rollback; configuration, remotes, and earlier imports remain in place.
 
 ### Zed IDE
 

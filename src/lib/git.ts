@@ -11,7 +11,8 @@ import { GitOutputError } from "./errors";
 import { createHookReporter } from "./git-hooks";
 import type { HookReporter } from "../types/git";
 
-async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<string> {
+/** Run Git directly, preserving terminal output and enforcing native hook deadlines. */
+export async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<string> {
   const timeout = resolveHookTimeout();
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY && ["commit", "push", "subtree", "fetch"].includes(args[0] ?? ""));
   const terminalState = interactive && process.platform !== "win32"
@@ -84,7 +85,8 @@ function killProcessTree(pid: number): void {
   }
 }
 
-async function tryGit(args: string[], cwd: string): Promise<string | null> {
+/** Read optional Git metadata, returning null when Git reports a nonzero exit code. */
+export async function tryGit(args: string[], cwd: string): Promise<string | null> {
   const result = await x("git", args, { nodeOptions: { cwd } });
   return result.exitCode === 0 ? result.stdout : null;
 }
@@ -133,9 +135,9 @@ export async function push(repo: string, remote: string, branch: string, onHook?
   await git(["push", "--", remote, branch], repo, onHook);
 }
 
-/** Compare committed subtree contents with the remote's main branch. */
+/** Compare committed subtree contents with the remote's default branch. */
 export async function hasSubtreeChanges(repo: string, prefix: string, remote: string, onHook?: HookReporter): Promise<boolean> {
-  await git(["fetch", "--quiet", remote, "main"], repo, onHook);
+  await git(["fetch", "--quiet", remote, "HEAD"], repo, onHook);
   const changes = await git(["diff", "--name-only", "FETCH_HEAD", `HEAD:${prefix}`, "--"], repo);
   return Boolean(changes.trim());
 }

@@ -256,12 +256,13 @@ async function initSubtrees(): Promise<void> {
   await exec("git", ["checkout", "--quiet", "-b", "feature/publish"], { cwd: root });
   for (const remote of ["front", "back"]) {
     const source = await initRepo(join(root, `source-${remote}`));
-    await exec("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: source });
+    const branch = remote === "front" ? "main" : "master";
+    await exec("git", ["symbolic-ref", "HEAD", `refs/heads/${branch}`], { cwd: source });
     await writeFile(join(source, "file.txt"), remote);
     await stageAll(source);
     await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "initial"], { cwd: source });
     await exec("git", ["remote", "add", remote, source], { cwd: root });
-    await exec("git", ["subtree", "add", `--prefix=packages/${remote}`, remote, "main", "--squash"], { cwd: root });
+    await exec("git", ["subtree", "add", `--prefix=packages/${remote}`, remote, branch, "--squash"], { cwd: root });
   }
 }
 
