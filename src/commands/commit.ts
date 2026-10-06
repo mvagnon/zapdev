@@ -22,6 +22,7 @@ import {
   getPushRemote,
   getRepoStatus,
   getStagedDiff,
+  getStagedDiffStats,
   git as runGit,
   hasUnpushedCommits,
   push,
@@ -33,10 +34,10 @@ import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import { COMMIT_TYPES } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
-import type { HookReporter } from "../types/git";
+import type { DiffStats, HookReporter } from "../types/git";
 
 type Repository = { repo: string; label: string; pendingLabel: string };
-type CommitDraft = Repository & { message: string };
+type CommitDraft = Repository & { message: string; stats: DiffStats };
 type CommitAction = "all" | "cancel" | { action: "commit" | "edit"; draft: CommitDraft };
 
 /** Commit the current repository or review direct child repositories together. */
@@ -143,14 +144,15 @@ export const commitCommand = defineCommand({
       const { repo } = repository;
       const { branch, hasChanges } = await getRepoStatus(repo);
       repository.label = `${basename(repo)} (${branch})`;
-      repository.pendingLabel = hasChanges ? styleText(["bold", "underline"], repository.label) : repository.label;
+      repository.pendingLabel = hasChanges ? styleText("bold", repository.label) : repository.label;
       if (!args.staged) await stageAll(repo);
       const diff = await getStagedDiff(repo);
       if (!diff.trim()) return null;
+      const stats = await getStagedDiffStats(repo);
       if (scan) await scanStagedChanges(repo);
       const message = await generateCommitMessage(diff, config, args.type);
       if (!message) throw new Error("The model returned an empty message.");
-      return { ...repository, message };
+      return { ...repository, message, stats };
     }));
     loader?.stop("Repositories prepared");
 
@@ -194,7 +196,7 @@ export const commitCommand = defineCommand({
           if (branch !== current) {
             await switchBranch(draft.repo, branch);
             draft.label = `${basename(draft.repo)} (${branch})`;
-            draft.pendingLabel = styleText(["bold", "underline"], draft.label);
+            draft.pendingLabel = styleText("bold", draft.label);
           }
         }
         log.info(`${draft.label}: committing`);
@@ -281,7 +283,9 @@ function reportHooks(label: string): HookReporter {
 
 async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean): Promise<CommitDraft[] | null> {
   while (true) {
-    for (const draft of drafts) log.message(`${draft.pendingLabel}: ${draft.message}`);
+    for (const { stats, pendingLabel, message } of drafts) {
+      log.message(`(${styleText("green", `+${stats.additions}`)} ${styleText("red", `-${stats.deletions}`)}) ${pendingLabel}: ${message}`);
+    }
     if (!canPrompt) return drafts;
 
     const action = await select<CommitAction>({

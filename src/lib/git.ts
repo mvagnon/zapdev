@@ -9,7 +9,7 @@ import { x } from "tinyexec";
 import { resolveHookTimeout } from "./config";
 import { GitOutputError } from "./errors";
 import { createHookReporter } from "./git-hooks";
-import type { HookReporter } from "../types/git";
+import type { DiffStats, HookReporter } from "../types/git";
 
 /** Run Git directly, preserving terminal output and enforcing native hook deadlines. */
 export async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<string> {
@@ -100,6 +100,18 @@ export async function stageAll(repo: string): Promise<void> {
 /** Read the staged diff of the given repository. */
 export async function getStagedDiff(repo: string): Promise<string> {
   return git(["diff", "--cached"], repo);
+}
+
+/** Count staged line additions and deletions using Git's machine-readable stats. */
+export async function getStagedDiffStats(repo: string): Promise<DiffStats> {
+  const output = await git(["diff", "--cached", "--numstat"], repo);
+  const stats: DiffStats = { additions: 0, deletions: 0 };
+  for (const line of output.trim().split("\n")) {
+    const [additions, deletions] = line.split("\t");
+    stats.additions += Number(additions) || 0;
+    stats.deletions += Number(deletions) || 0;
+  }
+  return stats;
 }
 
 /** Commit the staged changes in the given repository. */

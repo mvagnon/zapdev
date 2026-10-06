@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { x } from "tinyexec";
 
-import { commit, currentBranch, findRepos, getPushRemote, getRepoStatus, getStagedDiff, git, hasUnpushedCommits, push, stageAll, switchBranch } from "./git";
+import { commit, currentBranch, findRepos, getPushRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, hasUnpushedCommits, push, stageAll, switchBranch } from "./git";
 import type { HookEvent } from "../types/git";
 
 const exec = promisify(execFile);
@@ -76,6 +76,19 @@ it("stages and reads each repo independently without changing the process direct
   expect(diff).toContain("back change");
   expect(diff).not.toContain("front change");
   expect(process.cwd()).toBe(cwd);
+});
+
+it("sums staged line additions and deletions, ignoring binaries and unstaged changes", async () => {
+  await configureHooks();
+  await commit(root, "chore: initial");
+  await expect(getStagedDiffStats(root)).resolves.toEqual({ additions: 0, deletions: 0 });
+  await writeFile(join(root, "file.txt"), "one\ntwo\nthree\n");
+  await writeFile(join(root, "new\tfile\n.txt"), "four\nfive\n");
+  await writeFile(join(root, "binary.bin"), Buffer.from([0, 1, 2]));
+  await stageAll(root);
+  await writeFile(join(root, "file.txt"), "unstaged content\n");
+
+  await expect(getStagedDiffStats(root)).resolves.toEqual({ additions: 5, deletions: 1 });
 });
 
 it("reports branches and pending changes for unborn, staged, unstaged and detached states", async () => {

@@ -45,6 +45,7 @@ beforeEach(() => {
   process.exitCode = undefined;
   vi.mocked(git.findRepos).mockResolvedValue(repos);
   vi.mocked(git.getStagedDiff).mockImplementation(async (repo) => repo);
+  vi.mocked(git.getStagedDiffStats).mockResolvedValue({ additions: 12, deletions: 3 });
   const branches = new Map(repos.map((repo) => [repo, "main"]));
   vi.mocked(git.currentBranch).mockImplementation(async (repo) => branches.get(repo) ?? "main");
   vi.mocked(git.switchBranch).mockImplementation(async (repo, branch) => { branches.set(repo, branch); });
@@ -295,6 +296,7 @@ it("edits one repo, then commits only that repo with its edited message", async 
   await runCommand(commitCommand, { rawArgs: [] });
 
   expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: edited back", expect.any(Function));
+  expect(log.message).toHaveBeenCalledWith("(+12 -3) back (main): fix: edited back");
   expect(select).toHaveBeenCalledWith(expect.objectContaining({
     options: expect.arrayContaining([
       expect.objectContaining({ label: 'Commit only "back (main)"' }),
@@ -307,7 +309,7 @@ it("edits one repo, then commits only that repo with its edited message", async 
   expect(git.push).not.toHaveBeenCalled();
 });
 
-it.each(["color", "pipe", "NO_COLOR"])("shows branches and highlights only pending changes: %s", async (output) => {
+it.each(["color", "pipe", "NO_COLOR"])("prefixes pending commit messages with colored staged diff stats: %s", async (output) => {
   vi.stubEnv("NO_COLOR", output === "NO_COLOR" ? "1" : undefined);
   vi.stubEnv("NODE_DISABLE_COLORS", undefined);
   vi.stubEnv("FORCE_COLOR", output === "color" ? "1" : undefined);
@@ -320,9 +322,11 @@ it.each(["color", "pipe", "NO_COLOR"])("shows branches and highlights only pendi
 
   await runCommand(commitCommand, { rawArgs: ["--yes"] });
 
-  const label = output === "color" ? "\u001b[1m\u001b[4mback (fix/api)\u001b[24m\u001b[22m" : "back (fix/api)";
+  const label = output === "color" ? "\u001b[1mback (fix/api)\u001b[22m" : "back (fix/api)";
+  const stats = output === "color" ? "(\u001b[32m+12\u001b[39m \u001b[31m-3\u001b[39m)" : "(+12 -3)";
   expect(log.info).toHaveBeenCalledWith("front (main): nothing to commit.");
-  expect(log.message).toHaveBeenCalledExactlyOnceWith(`${label}: fix: back`);
+  expect(log.message).toHaveBeenCalledExactlyOnceWith(`${stats} ${label}: fix: back`);
+  expect(git.getStagedDiffStats).toHaveBeenCalledExactlyOnceWith("/repos/back");
   expect(log.success).toHaveBeenCalledExactlyOnceWith("back (fix/api): committed fix: back");
 });
 

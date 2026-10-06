@@ -1,3 +1,6 @@
+/** Line counts in a staged diff, excluding binary files. */
+export type DiffStats = { additions: number; deletions: number };
+
 /** A Git hook invocation observed through Trace2. */
 export type HookEvent =
   | { name: string; phase: "start" }
