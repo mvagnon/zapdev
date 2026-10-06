@@ -14,7 +14,7 @@ import {
   text,
 } from "@clack/prompts";
 
-import { resolveConfig, resolveHookTimeout, resolveSubtrees } from "../lib/config";
+import { resolveConfig, resolveHookTimeout } from "../lib/config";
 import {
   commit as gitCommit,
   currentBranch,
@@ -22,6 +22,7 @@ import {
   getPushRemote,
   getRepoStatus,
   getStagedDiff,
+  git as runGit,
   hasUnpushedCommits,
   push,
   stageAll,
@@ -31,7 +32,7 @@ import { errorMessage, GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import { COMMIT_TYPES } from "../types/commit";
-import type { SubtreeMapping, ZapdevConfig } from "../types/config";
+import type { ZapdevConfig } from "../types/config";
 import type { HookReporter } from "../types/git";
 
 type Repository = { repo: string; label: string; pendingLabel: string };
@@ -70,6 +71,10 @@ export const commitCommand = defineCommand({
       alias: "p",
       description: "Skip push confirmation and push the current branch.",
     },
+    pull: {
+      type: "boolean",
+      description: "Pull fast-forward updates before staging or generating commit messages.",
+    },
     staged: {
       type: "boolean",
       alias: "s",
@@ -85,7 +90,6 @@ export const commitCommand = defineCommand({
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
     let config: ZapdevConfig;
-    let subtrees: SubtreeMapping;
     try {
       resolveHookTimeout();
       config = resolveConfig(process.env, {
@@ -93,14 +97,12 @@ export const commitCommand = defineCommand({
         model: args.model,
         effort: args.effort,
       });
-      subtrees = await resolveSubtrees(process.cwd());
     } catch (error) {
       log.error(errorMessage(error));
       process.exitCode = 1;
       return;
     }
 
-    const publishSubtreeMode = Object.keys(subtrees).length > 0;
     if (interactive) intro("zapdev commit");
 
     const repos = await findRepos(process.cwd());
@@ -108,6 +110,20 @@ export const commitCommand = defineCommand({
       log.warn("No git repository found here or in direct children.");
       if (interactive) outro("Nothing to do.");
       return;
+    }
+
+    if (args.pull) {
+      for (const repo of repos) {
+        const label = basename(repo);
+        try {
+          log.info(`${label}: pulling`);
+          await runGit(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, reportHooks(label));
+        } catch (error) {
+          reportGitFailure(`${label}: pull failed`, error);
+          process.exitCode = 1;
+          return;
+        }
+      }
     }
 
     let scan: boolean;
@@ -192,43 +208,48 @@ export const commitCommand = defineCommand({
     }
     toSend.push(...unchanged);
     if (toSend.length === 0) return;
+    if (!interactive && !args.push) return;
+
+    const destinations: { repo: string; label: string; branch: string; remote: string }[] = [];
+    for (const { repo, label } of toSend) {
+      try {
+        const branch = await currentBranch(repo);
+        const remote = await getPushRemote(repo, branch);
+        if (remote) destinations.push({ repo, label, branch, remote });
+        else log.warn(`${label}: no remote or ambiguous remote choice. Skipping push; commit remains local.`);
+      } catch (error) {
+        reportGitFailure(`${label}: push failed`, error);
+        process.exitCode = 1;
+        return;
+      }
+    }
 
     let shouldPush = Boolean(args.push);
-    if (!shouldPush && interactive) {
+    if (!shouldPush && interactive && destinations.length) {
       const answer = await confirm({
-        message: `${publishSubtreeMode ? "Publish subtrees in" : "Push"} ${toSend.map(({ label }) => label).join(", ")}?`,
+        message: `Push ${destinations.map(({ label }) => label).join(", ")}?`,
         initialValue: false,
       });
       if (isCancel(answer)) {
-        outro(publishSubtreeMode ? "Committed. Not published." : "Committed. Not pushed.");
+        outro("Committed. Not pushed.");
         return;
       }
       shouldPush = answer;
     }
 
     if (shouldPush) {
-      for (const { repo, label } of toSend) {
+      for (const { repo, label, branch, remote } of destinations) {
         try {
-          const current = await currentBranch(repo);
-          const destinations: [string, string | null][] = publishSubtreeMode
-            ? Object.entries(subtrees)
-            : [["", await getPushRemote(repo, current)]];
-          for (const [prefix, remote] of destinations) {
-            if (!remote) {
-              log.warn(`${label}: no remote or ambiguous remote choice. Skipping push; commit remains local.`);
-              continue;
-            }
-            log.info(`${label}: checking unpublished commits${prefix ? ` in ${prefix}` : ""} (${remote}/${current}).`);
-            if (!await hasUnpushedCommits(repo, remote, current, reportHooks(label), prefix || undefined)) {
-              log.info(`${label}: no unpushed commits${prefix ? ` in ${prefix}` : ""}. Skipping.`);
-              continue;
-            }
-            log.info(`${label}: pushing ${publishSubtreeMode ? `${prefix} → ` : ""}${remote}/${current}`);
-            await push(repo, remote, current, reportHooks(label), prefix || undefined);
-            log.success(`${label}: pushed to ${remote}/${current}`);
+          log.info(`${label}: checking unpublished commits (${remote}/${branch}).`);
+          if (!await hasUnpushedCommits(repo, remote, branch, reportHooks(label))) {
+            log.info(`${label}: no unpushed commits. Skipping.`);
+            continue;
           }
+          log.info(`${label}: pushing ${remote}/${branch}`);
+          await push(repo, remote, branch, reportHooks(label));
+          log.success(`${label}: pushed to ${remote}/${branch}`);
         } catch (error) {
-          reportGitFailure(`${label}: ${publishSubtreeMode ? "publication" : "push"} failed`, error);
+          reportGitFailure(`${label}: push failed`, error);
           process.exitCode = 1;
           outro("Sending stopped after a Git failure.");
           return;

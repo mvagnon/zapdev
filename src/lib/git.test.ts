@@ -278,90 +278,47 @@ it("reports an actual pre-push hook and its exit code", async () => {
   ]);
 });
 
-async function initSubtrees(): Promise<void> {
+it("pulls fast-forward updates without losing local changes and refuses divergent history", async () => {
   await configureHooks();
   await commit(root, "chore: initial");
-  await exec("git", ["checkout", "--quiet", "-b", "feature/publish"], { cwd: root });
-  for (const remote of ["front", "back"]) {
-    const source = await initRepo(join(root, `source-${remote}`));
-    const branch = remote === "front" ? "main" : "master";
-    await exec("git", ["symbolic-ref", "HEAD", `refs/heads/${branch}`], { cwd: source });
-    await writeFile(join(source, "file.txt"), remote);
-    await stageAll(source);
-    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "initial"], { cwd: source });
-    await exec("git", ["remote", "add", remote, source], { cwd: root });
-    await exec("git", ["subtree", "add", `--prefix=packages/${remote}`, remote, branch, "--squash"], { cwd: root });
-  }
-}
+  const branch = await currentBranch(root);
+  const remote = join(root, ".git", "remote.git");
+  const upstream = join(root, ".git", "upstream");
+  await exec("git", ["init", "--quiet", "--bare", remote]);
+  await git(["remote", "add", "origin", remote], root);
+  await git(["push", "--quiet", "-u", "origin", branch], root);
+  await exec("git", ["clone", "--quiet", "--branch", branch, remote, upstream]);
+  await writeFile(join(upstream, "file.txt"), "remote change");
+  await stageAll(upstream);
+  await git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "remote change"], upstream);
+  await push(upstream, "origin", branch);
+  await writeFile(join(root, "local.txt"), "local change");
 
-it("publishes only committed subtree contents, skips unchanged subtrees and preserves hooks", async () => {
-  await initSubtrees();
-  await writeFile(join(root, "packages", "front", "file.txt"), "published change");
-  await exec("git", ["add", "packages/front/file.txt"], { cwd: root });
-  await commit(root, "feat: front change");
-  await writeFile(join(root, "packages", "front", "file.txt"), "uncommitted change");
-  await writeFile(join(root, "hooks", "pre-push"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-  const events: HookEvent[] = [];
+  await git(["pull", "--ff-only", "--no-rebase", "--no-autostash"], root);
 
-  await expect(hasUnpushedCommits(root, "front", "main", undefined, "packages/front")).resolves.toBe(true);
-  await expect(hasUnpushedCommits(root, "back", "master", undefined, "packages/back")).resolves.toBe(false);
-  await expect(hasUnpushedCommits(root, "front", "feature/new", undefined, "packages/front")).resolves.toBe(true);
-  await expect(hasUnpushedCommits(root, "back", "feature/new", undefined, "packages/back")).resolves.toBe(false);
-  await expect(hasUnpushedCommits(root, "missing-remote", "main", undefined, "packages/front")).rejects.toThrow();
-  await push(root, "front", "feature/destination", (event) => events.push(event), "packages/front");
-  const source = join(root, "source-front");
-  const published = await exec("git", ["show", "feature/destination:file.txt"], { cwd: source });
-  expect(published.stdout).toBe("published change");
-  const files = await exec("git", ["ls-tree", "--name-only", "feature/destination"], { cwd: source });
-  expect(files.stdout.trim()).toBe("file.txt");
-  await expect(exec("git", ["rev-parse", "--verify", "feature/destination"], { cwd: join(root, "source-back") })).rejects.toThrow();
-  expect(events).toContainEqual({ name: "pre-push", phase: "exit", exitCode: 0 });
-  await expect(hasUnpushedCommits(root, "front", "feature/destination", undefined, "packages/front")).resolves.toBe(false);
-  await expect(hasUnpushedCommits(root, "front", "main", undefined, "packages/front")).resolves.toBe(true);
-
-  await exec("git", ["checkout", "--quiet", "feature/destination"], { cwd: source });
-  await writeFile(join(source, "file.txt"), "remote-only change");
-  await stageAll(source);
-  await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "diverging change"], { cwd: source });
-  const beforePush = await exec("git", ["rev-parse", "feature/destination"], { cwd: source });
-  await exec("git", ["checkout", "--quiet", "main"], { cwd: source });
-  await expect(push(root, "front", "feature/destination", undefined, "packages/front")).rejects.toThrow();
-  const remoteHead = await exec("git", ["rev-parse", "feature/destination"], { cwd: source });
-  expect(remoteHead.stdout).toBe(beforePush.stdout);
-}, 15_000);
-
-it("captures the split commit ID even when running in a terminal", async () => {
-  await initSubtrees();
-  const stdinTTY = process.stdin.isTTY;
-  const stdoutTTY = process.stdout.isTTY;
-  try {
-    process.stdin.isTTY = true;
-    process.stdout.isTTY = true;
-    const source = (await git(["subtree", "split", "--prefix=packages/front", "--quiet", "HEAD"], root)).trim();
-    expect(source).toMatch(/^[a-f0-9]{40,64}$/);
-    expect(await git(["show", `${source}:file.txt`], root)).toBe("front");
-  } finally {
-    process.stdin.isTTY = stdinTTY;
-    process.stdout.isTTY = stdoutTTY;
-  }
-}, 15_000);
-
-it.each([false, true])("allows pushing to main (subtree=%s)", async (subtree) => {
-  await initSubtrees();
-  await writeFile(join(root, "packages", "front", "file.txt"), "main change");
+  expect(await git(["show", "HEAD:file.txt"], root)).toBe("remote change");
+  expect(await git(["status", "--porcelain"], root)).toContain("?? local.txt");
   await stageAll(root);
+  await commit(root, "chore: local change");
+  const before = await git(["rev-parse", "HEAD"], root);
+  await writeFile(join(upstream, "file.txt"), "divergent remote change");
+  await stageAll(upstream);
+  await git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "divergent change"], upstream);
+  await push(upstream, "origin", branch);
+
+  await expect(git(["pull", "--ff-only", "--no-rebase", "--no-autostash"], root)).rejects.toThrow();
+  expect(await git(["rev-parse", "HEAD"], root)).toBe(before);
+  expect(await git(["show", "HEAD:local.txt"], root)).toBe("local change");
+});
+
+it("allows pushing to main", async () => {
+  await configureHooks();
   await commit(root, "feat: main change");
   const remote = join(root, "main.git");
   await exec("git", ["init", "--quiet", "--bare", remote]);
   await git(["remote", "add", "destination", remote], root);
-  await push(root, "destination", "main", undefined, subtree ? "packages/front" : undefined);
-  const path = subtree ? "file.txt" : "packages/front/file.txt";
-  expect(await git(["show", `main:${path}`], remote)).toBe("main change");
-}, 15_000);
-
-it("refuses invalid branch names before publication", async () => {
-  await initRepo(root);
-  await expect(push(root, "front", "invalid..branch", undefined, "packages/front")).rejects.toThrow("valid branch");
+  await push(root, "destination", "main");
+  expect(await git(["show", "main:file.txt"], remote)).toBe("change");
 });
 
 it("pushes HEAD to a new destination without changing local branches or their upstream", async () => {
@@ -418,7 +375,6 @@ it("detects unpushed commits against the requested remote branch, ignoring upstr
 it("has no commits to push in an unborn repository", async () => {
   await initRepo(root);
   await expect(hasUnpushedCommits(root, "origin", "main")).resolves.toBe(false);
-  await expect(hasUnpushedCommits(root, "front", "main", undefined, "packages/front")).resolves.toBe(false);
 });
 
 it.each(["", "--force", "invalid..branch", "main:other"])("rejects invalid push input before sending: %s", async (branch) => {

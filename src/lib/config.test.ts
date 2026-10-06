@@ -1,51 +1,8 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { resolveConfig, resolveHookTimeout, resolveSubtrees } from "./config";
+import { resolveConfig, resolveHookTimeout } from "./config";
 
 const env = { ZD_URL: "http://localhost:1234/v1/chat/completions", ZD_MODEL: "my-model", ZD_EFFORT: "low" };
-
-describe("resolveSubtrees", () => {
-  let directory: string;
-  beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), "zapdev-config-")); });
-  afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
-
-  it("defaults to classic push and only reads zapdev.json in the launch directory", async () => {
-    await expect(resolveSubtrees(directory)).resolves.toEqual({});
-    const subtrees = { "apps/ui": "frontend", "services/api": "backend" };
-    await writeFile(join(directory, "zapdev.json"), JSON.stringify({ subtrees }));
-    await expect(resolveSubtrees(directory)).resolves.toEqual(subtrees);
-    const child = join(directory, "child");
-    await mkdir(child);
-    await expect(resolveSubtrees(child)).resolves.toEqual({});
-  });
-
-  it.each([{}, { subtrees: {} }])("uses classic push for an absent or empty mapping: %j", async (config) => {
-    await writeFile(join(directory, "zapdev.json"), JSON.stringify(config));
-    await expect(resolveSubtrees(directory)).resolves.toEqual({});
-  });
-
-  it.each([
-    '{', 'null', '[]', '{"isSubtree":true}', '{"isSubtree":false}',
-    '{"subtrees":null}', '{"subtrees":true}', '{"subtrees":[]}',
-    '{"subtrees":{"apps/ui":null}}', '{"subtrees":{"apps/ui":""}}',
-    '{"subtrees":{"apps/ui":"--all"}}', '{"subtrees":{"apps/ui":" remote "}}',
-    '{"subtrees":{"":"front"}}', '{"subtrees":{".":"front"}}',
-    '{"subtrees":{"../outside":"front"}}', '{"subtrees":{"apps/../ui":"front"}}',
-    '{"subtrees":{"/absolute":"front"}}', '{"subtrees":{".git":"front"}}',
-  ])(
-    "rejects invalid configuration before choosing a push mode: %s", async (content) => {
-      await writeFile(join(directory, "zapdev.json"), content);
-      await expect(resolveSubtrees(directory)).rejects.toThrow("zapdev.json");
-    });
-
-  it("does not treat unreadable configuration as a missing file", async () => {
-    await mkdir(join(directory, "zapdev.json"));
-    await expect(resolveSubtrees(directory)).rejects.toThrow("Unable to read zapdev.json");
-  });
-});
 
 it("defaults hook deadlines to 60 seconds and accepts a valid environment override", () => {
   expect(resolveHookTimeout({})).toBe(60_000);

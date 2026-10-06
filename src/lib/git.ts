@@ -15,8 +15,7 @@ import type { HookReporter } from "../types/git";
 export async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<string> {
   const timeout = resolveHookTimeout();
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY
-    && ["commit", "push", "subtree", "fetch", "ls-remote"].includes(args[0] ?? "")
-    && !(args[0] === "subtree" && args[1] === "split"));
+    && ["commit", "pull", "push", "fetch", "ls-remote"].includes(args[0] ?? ""));
   const terminalState = interactive && process.platform !== "win32"
     ? execFileSync("stty", ["-g"], { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim()
     : undefined;
@@ -139,26 +138,23 @@ export async function getPushRemote(repo: string, branch: string): Promise<strin
   return remotes.length === 1 ? remotes[0]! : null;
 }
 
-/** Push committed repository or subtree history without force or changes to local branches and upstreams. */
-export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter, prefix?: string): Promise<void> {
+/** Push committed repository history without force or changes to local branches and upstreams. */
+export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter): Promise<void> {
   await git(["check-ref-format", "--branch", branch], repo);
-  await git(prefix
-    ? ["subtree", "push", `--prefix=${prefix}`, remote, branch]
-    : ["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook);
+  await git(["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook);
 }
 
 /** Check committed history against the current branch's destination, falling back to the remote's default branch. */
-export async function hasUnpushedCommits(repo: string, remote: string, branch: string, onHook?: HookReporter, prefix?: string): Promise<boolean> {
+export async function hasUnpushedCommits(repo: string, remote: string, branch: string, onHook?: HookReporter): Promise<boolean> {
   if (await tryGit(["rev-parse", "--verify", "HEAD"], repo) === null) return false;
   await git(["check-ref-format", "--branch", branch], repo);
-  const source = prefix ? (await git(["subtree", "split", `--prefix=${prefix}`, "--quiet", "HEAD"], repo)).trim() : "HEAD";
   const ref = `refs/heads/${branch}`;
   const refs = new Set((await git(["ls-remote", "--", remote, ref, "HEAD"], repo, onHook))
     .trim().split("\n").map((line) => line.split("\t")[1]));
   const target = refs.has(ref) ? ref : refs.has("HEAD") ? "HEAD" : null;
   if (!target) return true;
   await git(["fetch", "--quiet", "--", remote, target], repo, onHook);
-  return Boolean((await git(["rev-list", "--max-count=1", `FETCH_HEAD..${source}`], repo)).trim());
+  return Boolean((await git(["rev-list", "--max-count=1", "FETCH_HEAD..HEAD"], repo)).trim());
 }
 
 /** Find the enclosing working tree, or only direct child working trees outside a repo. */

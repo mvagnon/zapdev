@@ -7,7 +7,6 @@ vi.mock("citty", async (importOriginal) => ({
   runMain: vi.fn(),
 }));
 vi.mock("./commands/commit", () => ({ commitCommand: { args: {} } }));
-vi.mock("./commands/subtree-init", () => ({ subtreeInitCommand: {} }));
 
 afterEach(() => { updateSettings({ withGuide: true }); });
 
@@ -18,5 +17,7 @@ it("disables the Clack guide globally before running any command", async () => {
   });
 
   await import("./cli");
-  expect(runMain).toHaveBeenCalledExactlyOnceWith(expect.any(Object));
+  expect(runMain).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    subCommands: { commit: { args: {} } },
+  }));
 });
