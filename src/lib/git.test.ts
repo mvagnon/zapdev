@@ -218,7 +218,7 @@ if (!(await getStagedDiff(${JSON.stringify(root)})).includes("change")) throw ne
 try {
   await commit(${JSON.stringify(root)}, "fix: interactive", ${JSON.stringify(mode)} === "failure" ? (event) => {
     if (event.phase === "exit" && event.exitCode !== 0) console.log("HOOK_FAILURE_STATUS");
-   } : undefined, (phase) => console.log("NATIVE_" + phase));
+   } : undefined);
   console.log("INTERACTIVE_DONE");
 } catch (error) {
   if (${JSON.stringify(mode)} === "timeout") {
@@ -250,10 +250,6 @@ try {
   expect(result.stderr).toBe("");
   expect(result.exitCode, result.stdout).toBe(0);
   expect(result.stdout).toContain("HOOK_LOG");
-  expect(result.stdout.match(/NATIVE_start/g)).toHaveLength(1);
-  expect(result.stdout.match(/NATIVE_exit/g)).toHaveLength(1);
-  expect(result.stdout.indexOf("NATIVE_start")).toBeLessThan(result.stdout.indexOf("HOOK_LOG"));
-  expect(result.stdout.indexOf("NATIVE_exit")).toBeGreaterThan(result.stdout.indexOf("HOOK_LOG"));
   expect(result.stdout).toContain(mode === "answer" ? "HOOK_ANSWER=y" : mode === "timeout" ? "TIMEOUT_OK" : "NATIVE_FAILURE_OK");
   if (mode === "failure") expect(result.stdout.match(/HOOK_DIAGNOSTIC/g)).toHaveLength(1);
   if (mode === "silent-failure") expect(result.stdout).not.toContain("HOOK_DIAGNOSTIC");

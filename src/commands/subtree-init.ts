@@ -3,7 +3,6 @@ import { defineCommand } from "citty";
 
 import { errorMessage, GitOutputError } from "../lib/errors";
 import { initializeSubtrees, parseSubtreeSources } from "../lib/subtree-init";
-import { reportNativeOutput } from "./native-output";
 
 /** Initialize named subtrees and their zapdev.json mapping without an LLM or external prompt tool. */
 export const subtreeInitCommand = defineCommand({
@@ -19,7 +18,7 @@ export const subtreeInitCommand = defineCommand({
       const sources = parseSubtreeSources(args._.slice(1));
       if (interactive) intro("zapdev subtree-init");
       await initializeSubtrees(args.directory, sources, {
-        origin: args.origin, onProgress: log.info, onWarning: log.warn, onNativeOutput: reportNativeOutput,
+        origin: args.origin, onProgress: log.info, onWarning: log.warn,
       });
       if (interactive) outro("Subtrees ready.");
       else log.info("Subtrees ready.");

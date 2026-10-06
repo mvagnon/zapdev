@@ -1,8 +1,11 @@
+import { updateSettings } from "@clack/prompts";
 import { defineCommand, runMain } from "citty";
 
 import pkg from "../package.json";
 import { commitCommand } from "./commands/commit";
 import { subtreeInitCommand } from "./commands/subtree-init";
+
+updateSettings({ withGuide: false });
 
 const main = defineCommand({
   meta: {

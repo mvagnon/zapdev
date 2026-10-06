@@ -33,7 +33,6 @@ import { generateCommitMessage } from "../lib/llm";
 import { COMMIT_TYPES } from "../types/commit";
 import type { SubtreeMapping, ZapdevConfig } from "../types/config";
 import type { HookReporter } from "../types/git";
-import { reportNativeOutput } from "./native-output";
 
 type Repository = { repo: string; label: string; pendingLabel: string };
 type CommitDraft = Repository & { message: string };
@@ -183,7 +182,7 @@ export const commitCommand = defineCommand({
           }
         }
         log.info(`${draft.label}: committing`);
-        await gitCommit(draft.repo, draft.message, reportHooks(draft.label), reportNativeOutput);
+        await gitCommit(draft.repo, draft.message, reportHooks(draft.label));
         toSend.push(draft);
         log.success(`${draft.label}: committed ${draft.message}`);
       } catch (error) {
@@ -220,12 +219,12 @@ export const commitCommand = defineCommand({
               continue;
             }
             log.info(`${label}: checking unpublished commits${prefix ? ` in ${prefix}` : ""} (${remote}/${current}).`);
-            if (!await hasUnpushedCommits(repo, remote, current, reportHooks(label), prefix || undefined, reportNativeOutput)) {
+            if (!await hasUnpushedCommits(repo, remote, current, reportHooks(label), prefix || undefined)) {
               log.info(`${label}: no unpushed commits${prefix ? ` in ${prefix}` : ""}. Skipping.`);
               continue;
             }
             log.info(`${label}: pushing ${publishSubtreeMode ? `${prefix} → ` : ""}${remote}/${current}`);
-            await push(repo, remote, current, reportHooks(label), prefix || undefined, reportNativeOutput);
+            await push(repo, remote, current, reportHooks(label), prefix || undefined);
             log.success(`${label}: pushed to ${remote}/${current}`);
           }
         } catch (error) {
@@ -248,14 +247,13 @@ function reportGitFailure(message: string, error: unknown): void {
 }
 
 function reportHooks(label: string): HookReporter {
-  const options = { secondarySymbol: "", withGuide: false };
   return (event) => {
     const hook = `${label}: ${event.name}`;
     if (event.phase === "start") {
-      log.step(styleText("bold", hook), options);
+      log.step(styleText("bold", hook));
     } else {
-      if (event.exitCode === 0) log.success(`${hook}: completed`, options);
-      else log.error(`${hook}: failed (exit ${event.exitCode})`, options);
+      if (event.exitCode === 0) log.success(`${hook}: completed`);
+      else log.error(`${hook}: failed (exit ${event.exitCode})`);
     }
   };
 }

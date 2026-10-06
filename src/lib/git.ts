@@ -9,10 +9,10 @@ import { x } from "tinyexec";
 import { resolveHookTimeout } from "./config";
 import { GitOutputError } from "./errors";
 import { createHookReporter } from "./git-hooks";
-import type { HookReporter, NativeOutputReporter } from "../types/git";
+import type { HookReporter } from "../types/git";
 
 /** Run Git directly, preserving terminal output and enforcing native hook deadlines. */
-export async function git(args: string[], cwd: string, onHook?: HookReporter, onNativeOutput?: NativeOutputReporter): Promise<string> {
+export async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<string> {
   const timeout = resolveHookTimeout();
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY
     && ["commit", "push", "subtree", "fetch", "ls-remote"].includes(args[0] ?? "")
@@ -20,7 +20,6 @@ export async function git(args: string[], cwd: string, onHook?: HookReporter, on
   const terminalState = interactive && process.platform !== "win32"
     ? execFileSync("stty", ["-g"], { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim()
     : undefined;
-  if (interactive) onNativeOutput?.("start");
   const child = x("git", args, {
     nodeOptions: {
       cwd,
@@ -63,11 +62,7 @@ export async function git(args: string[], cwd: string, onHook?: HookReporter, on
   } finally {
     reader?.close();
     close();
-    try {
-      if (terminalState) execFileSync("stty", [terminalState], { stdio: ["inherit", "ignore", "ignore"] });
-    } finally {
-      if (interactive) onNativeOutput?.("exit");
-    }
+    if (terminalState) execFileSync("stty", [terminalState], { stdio: ["inherit", "ignore", "ignore"] });
   }
 }
 
@@ -109,8 +104,8 @@ export async function getStagedDiff(repo: string): Promise<string> {
 }
 
 /** Commit the staged changes in the given repository. */
-export async function commit(repo: string, message: string, onHook?: HookReporter, onNativeOutput?: NativeOutputReporter): Promise<void> {
-  await git(["commit", "--quiet", "-m", message], repo, onHook, onNativeOutput);
+export async function commit(repo: string, message: string, onHook?: HookReporter): Promise<void> {
+  await git(["commit", "--quiet", "-m", message], repo, onHook);
 }
 
 /** Resolve the current branch, failing for a detached HEAD. */
@@ -145,24 +140,24 @@ export async function getPushRemote(repo: string, branch: string): Promise<strin
 }
 
 /** Push committed repository or subtree history without force or changes to local branches and upstreams. */
-export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter, prefix?: string, onNativeOutput?: NativeOutputReporter): Promise<void> {
+export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter, prefix?: string): Promise<void> {
   await git(["check-ref-format", "--branch", branch], repo);
   await git(prefix
     ? ["subtree", "push", `--prefix=${prefix}`, remote, branch]
-    : ["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook, onNativeOutput);
+    : ["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook);
 }
 
 /** Check committed history against the current branch's destination, falling back to the remote's default branch. */
-export async function hasUnpushedCommits(repo: string, remote: string, branch: string, onHook?: HookReporter, prefix?: string, onNativeOutput?: NativeOutputReporter): Promise<boolean> {
+export async function hasUnpushedCommits(repo: string, remote: string, branch: string, onHook?: HookReporter, prefix?: string): Promise<boolean> {
   if (await tryGit(["rev-parse", "--verify", "HEAD"], repo) === null) return false;
   await git(["check-ref-format", "--branch", branch], repo);
   const source = prefix ? (await git(["subtree", "split", `--prefix=${prefix}`, "--quiet", "HEAD"], repo)).trim() : "HEAD";
   const ref = `refs/heads/${branch}`;
-  const refs = new Set((await git(["ls-remote", "--", remote, ref, "HEAD"], repo, onHook, onNativeOutput))
+  const refs = new Set((await git(["ls-remote", "--", remote, ref, "HEAD"], repo, onHook))
     .trim().split("\n").map((line) => line.split("\t")[1]));
   const target = refs.has(ref) ? ref : refs.has("HEAD") ? "HEAD" : null;
   if (!target) return true;
-  await git(["fetch", "--quiet", "--", remote, target], repo, onHook, onNativeOutput);
+  await git(["fetch", "--quiet", "--", remote, target], repo, onHook);
   return Boolean((await git(["rev-list", "--max-count=1", `FETCH_HEAD..${source}`], repo)).trim());
 }
 

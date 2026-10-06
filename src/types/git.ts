@@ -5,6 +5,3 @@ export type HookEvent =
 
 /** Receive hook progress without changing how Git executes the hook. */
 export type HookReporter = (event: HookEvent) => void;
-
-/** Mark the boundaries of terminal-inherited Git output without styling it in the Git runner. */
-export type NativeOutputReporter = (phase: "start" | "exit") => void;
