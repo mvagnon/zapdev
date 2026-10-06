@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/mvagnon/zapdev/compare/v1.6.0...v1.7.0) (2026-10-06)
+
+
+### Features
+
+* Add subtree publication support for zapdev ([cc17780](https://github.com/mvagnon/zapdev/commit/cc17780aba46e992f1fa2bdc66ded2d29cb60a06))
+
 ## [1.6.0](https://github.com/mvagnon/zapdev/compare/v1.5.0...v1.6.0) (2026-10-04)
 
 
