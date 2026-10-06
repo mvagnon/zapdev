@@ -11,11 +11,9 @@ import { GitOutputError } from "./errors";
 import { createHookReporter } from "./git-hooks";
 import type { HookReporter } from "../types/git";
 
-const UPSTREAM_REF = "@{upstream}";
-
 async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<string> {
   const timeout = resolveHookTimeout();
-  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY && ["commit", "push", "pull", "fetch"].includes(args[0] ?? ""));
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY && ["commit", "push", "subtree", "fetch"].includes(args[0] ?? ""));
   const terminalState = interactive && process.platform !== "win32"
     ? execFileSync("stty", ["-g"], { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim()
     : undefined;
@@ -121,53 +119,32 @@ export async function getRepoStatus(repo: string): Promise<{ branch: string; has
   };
 }
 
-/** Check whether the current branch tracks an upstream. */
-export async function hasUpstream(repo: string): Promise<boolean> {
-  const result = await tryGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", UPSTREAM_REF], repo);
-  return result !== null;
+/** Resolve the upstream's named remote, or the only configured remote when no upstream exists. */
+export async function getPushRemote(repo: string, branch: string): Promise<string | null> {
+  const remotes = (await git(["remote"], repo)).trim().split("\n").filter(Boolean);
+  const upstream = (await git(["for-each-ref", "--format=%(upstream:remotename)", `refs/heads/${branch}`], repo)).trim();
+  if (upstream) return remotes.includes(upstream) ? upstream : null;
+  return remotes.length === 1 ? remotes[0]! : null;
 }
 
-/** Push the given repository's current branch. */
-export async function push(repo: string, onHook?: HookReporter): Promise<void> {
-  await git(["push", "--quiet"], repo, onHook);
+/** Push the requested branch to the selected remote without changing its upstream. */
+export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter): Promise<void> {
+  await git(["check-ref-format", "--branch", branch], repo);
+  await git(["push", "--", remote, branch], repo, onHook);
 }
 
-/** Push a branch to origin and configure its upstream. */
-export async function pushSetUpstream(repo: string, branch: string, onHook?: HookReporter): Promise<void> {
-  await git(["push", "--quiet", "-u", "origin", branch], repo, onHook);
+/** Compare committed subtree contents with the remote's main branch. */
+export async function hasSubtreeChanges(repo: string, prefix: string, remote: string, onHook?: HookReporter): Promise<boolean> {
+  await git(["fetch", "--quiet", remote, "main"], repo, onHook);
+  const changes = await git(["diff", "--name-only", "FETCH_HEAD", `HEAD:${prefix}`, "--"], repo);
+  return Boolean(changes.trim());
 }
 
-/** Publish committed projet-<remote> contents unless identical to remote/main; never force-push. */
-export async function publishSubtree(repo: string, remote: string, branch: string, onHook?: HookReporter): Promise<boolean> {
+/** Push committed subtree contents to the requested branch without force. */
+export async function publishSubtree(repo: string, prefix: string, remote: string, branch: string, onHook?: HookReporter): Promise<void> {
   if (branch === "main") throw new Error("Refusing to publish directly to main.");
   await git(["check-ref-format", "--branch", branch], repo);
-  await git(["fetch", "--quiet", remote, "main"], repo, onHook);
-  const split = (await git(["subtree", "split", "--quiet", `--prefix=projet-${remote}`], repo)).trim();
-  const changes = await git(["diff", "--name-only", "FETCH_HEAD", split, "--"], repo);
-  if (!changes.trim()) return false;
-  await git(["push", "--quiet", remote, `${split}:refs/heads/${branch}`], repo, onHook);
-  return true;
-}
-
-/** Rebase the current branch on its upstream. */
-export async function pullRebase(repo: string, onHook?: HookReporter): Promise<void> {
-  await git(["pull", "--quiet", "--rebase"], repo, onHook);
-}
-
-/** Merge the upstream into the current branch. */
-export async function pullMerge(repo: string, onHook?: HookReporter): Promise<void> {
-  await git(["pull", "--quiet", "--no-rebase", "--no-edit"], repo, onHook);
-}
-
-/** Fetch the given repository's remote references. */
-export async function fetchRemote(repo: string, onHook?: HookReporter): Promise<void> {
-  await git(["fetch", "--quiet"], repo, onHook);
-}
-
-/** Count upstream commits missing from HEAD using the last fetched state. */
-export async function behindCount(repo: string): Promise<number> {
-  const out = await tryGit(["rev-list", "--count", `HEAD..${UPSTREAM_REF}`], repo);
-  return out === null ? 0 : Number(out.trim()) || 0;
+  await git(["subtree", "push", `--prefix=${prefix}`, remote, branch], repo, onHook);
 }
 
 /** Find the enclosing working tree, or only direct child working trees outside a repo. */

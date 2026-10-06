@@ -125,60 +125,60 @@ zapdev commit
 | `--model <model>`   | Override the model                                                |
 | `--effort <effort>` | Override the reasoning effort                                     |
 | `-t, --type <type>` | Force the Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
-| `-p, --push`        | Push or publish subtrees after committing without asking           |
-| `--publish-subtree` | Publish subtrees instead of using the classic push                |
-| `--publish-subtree=false` | Force classic push, overriding `zapdev.json`                |
+| `-p, --push`        | Skip push confirmation; still ask for each destination branch      |
 | `-s, --staged`      | Commit only changes that are already staged                       |
-| `-r, --rebase`      | Rebase on upstream if the push is rejected                        |
-| `-m, --merge`       | Merge upstream if the push is rejected                            |
 | `-y, --yes`         | Skip commit review; still confirm push unless `--push` is set     |
 
 ```bash
 zapdev commit -t feat      # force the type
 zapdev commit --staged     # leave unstaged changes untouched
 zapdev commit -y           # commit automatically, then ask before pushing
-zapdev commit -yp          # commit and push without confirmation
+zapdev commit -yp          # commit automatically, then enter each push destination
 ```
 
 Before contacting the LLM endpoint, zapdev runs `gitleaks git --staged --verbose` in each changed repository when Gitleaks is installed. A failed scan skips that repository without sending its diff; when Gitleaks is absent, the scan is skipped. The staged diff is sent to the configured endpoint, which may be remote.
 
-Failures are reported per repository while the others continue. Any failure produces a nonzero exit code.
+Preparation and commit failures are reported per repository while the others continue. A push failure stops all remaining sends. Any failure produces a nonzero exit code.
 
 In a terminal, Git and its hooks display live logs and support native prompts, even with `--yes` (which skips commit review, not native Git prompts). Git controls hook stdin; interactive hooks should read from the terminal, for example `/dev/tty`. Each hook has a 60-second deadline, including time spent answering prompts; override it with `ZD_HOOK_TIMEOUT=120 zapdev commit`.
 
-Pushing is optimistic, with no preliminary fetch. If the branch is behind upstream, `--rebase` runs `git pull --rebase`, while `--merge` runs `git pull --no-rebase --no-edit`; zapdev then retries once. Without either flag, interactive runs ask whether to rebase, merge, or quit. Runs using `--yes` or without a TTY must provide one of the flags.
+Every push asks for a branch, even with `--yes --push`. Classic prompts are prefilled with the current branch. Classic pushes use the current branch's upstream remote, or the only configured remote if there is no upstream, and run `git push <remote> <input>` without changing the upstream. When no remote can be selected unambiguously, the repository's push is skipped with a warning, without a branch prompt. The input names the local branch to push, not a renamed destination for HEAD. Git rejections stop the command: no rebase, merge, retry, or force-push.
 
-Without a TTY, zapdev commits all prepared repositories automatically and only pushes when `--push` is set.
+Without a TTY, zapdev commits all prepared repositories automatically but cannot push; `--push` reports an error and leaves commits local.
 
 #### Subtree publication
 
 Place an optional `zapdev.json` in the directory where you launch zapdev:
 
 ```json
-{ "isSubtree": true }
+{
+  "subtrees": {
+    "projet-front": "front",
+    "projet-back": "back"
+  }
+}
 ```
 
 | `zapdev.json` option | Default | Effect |
 | ------------------- | ------- | ------ |
-| `isSubtree` | `false` | Replace classic push with subtree publication when `true`; must be a boolean. |
+| `subtrees` | `{}` | Map repository-relative folders to Git remote names. A nonempty mapping replaces classic push with subtree publication. |
 
 - **Scope:** only the launch directory's file is read, not parents or child repositories. Its setting applies to all successfully committed repositories.
-- **Priority:** explicit `--publish-subtree` / `--publish-subtree=false` overrides the file. Without a flag, invalid configuration stops the command before staging.
-- **Destinations:** `projet-front` → remote `front`, `projet-back` → remote `back`, both using the current branch name. `main` and detached HEAD are refused.
-- **Publication:** fetch each remote's `main`, split committed contents, skip contents identical to `main`, then push without force. Uncommitted changes are excluded.
-- **Failures:** stop that repository's publication, leaving earlier publications intact; other repositories continue. No automatic rebase/merge recovery.
+- **Configuration:** only `zapdev.json` selects subtree mode; no subtree CLI flag. Missing or empty `subtrees` uses classic push. Invalid configuration stops the command before staging. Replace the removed `isSubtree` option with an explicit mapping.
+- **Destinations:** only mapped folders are published, using their configured remotes; folder and remote names need not match. Each changed subtree asks for its own destination branch, prefilled with the previous answer across repositories in this run (current branch for the first prompt). Press Enter to reuse it. `main` and detached HEAD are refused.
+- **Publication:** fetch each remote's `main`, skip committed contents identical to `main` without prompting, then run `git subtree push --prefix=<folder> <remote> <input>`. Uncommitted changes are excluded.
+- **Failures:** stop all remaining publications, leaving earlier publications intact. No automatic recovery.
 
-Interactive runs still ask for confirmation, including with `--yes`; `--push` publishes without asking. Without a TTY, `--yes` alone does not publish.
+Interactive runs still ask for confirmation, including with `--yes`; `--push` skips only that confirmation, never the destination inputs. Publication requires a TTY.
 
 ```bash
-zapdev commit --publish-subtree        # ask to publish after committing
-zapdev commit --publish-subtree -yp    # publish without zapdev prompts
-zapdev commit --publish-subtree=false -yp # force classic push
+zapdev commit       # with subtrees configured, ask to publish after committing
+zapdev commit -yp   # enter a destination for each changed subtree
 ```
 
 ### Zed IDE
 
-For a faster review and commit workflow, review and stage changes from Zed's Git panel, then run `zapdev commit -syp` from a task. The command commits only staged changes, skips prompts, and pushes the commit.
+For a faster review and commit workflow, review and stage changes from Zed's Git panel, then run `zapdev commit -syp` from a task. The command commits only staged changes, skips commit review and push confirmation, then asks for the push destination.
 
 Add the following tasks to `.zed/tasks.json`:
 

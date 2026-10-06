@@ -15,35 +15,29 @@ import {
 } from "@clack/prompts";
 
 import { normalizeCommitType } from "../lib/commit-message";
-import { resolveConfig, resolveHookTimeout, resolvePublishSubtree } from "../lib/config";
+import { resolveConfig, resolveHookTimeout, resolveSubtrees } from "../lib/config";
 import {
-  behindCount,
   commit as gitCommit,
   currentBranch,
-  fetchRemote,
   findRepos,
+  getPushRemote,
   getRepoStatus,
   getStagedDiff,
-  hasUpstream,
-  pullMerge,
-  pullRebase,
+  hasSubtreeChanges,
   publishSubtree,
   push,
-  pushSetUpstream,
   stageAll,
 } from "../lib/git";
 import { errorMessage, GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import { COMMIT_TYPES } from "../types/commit";
-import type { ZapdevConfig } from "../types/config";
+import type { SubtreeMapping, ZapdevConfig } from "../types/config";
 import type { HookReporter } from "../types/git";
 
 type Repository = { repo: string; label: string; pendingLabel: string };
 type CommitDraft = Repository & { message: string };
 type CommitAction = "all" | "cancel" | { action: "commit" | "edit"; draft: CommitDraft };
-type SyncStrategy = "rebase" | "merge";
-type SyncAction = SyncStrategy | "quit";
 
 /** Commit the current repository or review direct child repositories together. */
 export const commitCommand = defineCommand({
@@ -73,26 +67,12 @@ export const commitCommand = defineCommand({
     push: {
       type: "boolean",
       alias: "p",
-      description: "Push or publish subtrees after committing without asking.",
-    },
-    "publish-subtree": {
-      type: "boolean",
-      description: "Publish projet-front and projet-back; use --publish-subtree=false to force classic push.",
+      description: "Skip push confirmation; still ask for each destination branch.",
     },
     staged: {
       type: "boolean",
       alias: "s",
       description: "Commit only changes that are already staged.",
-    },
-    rebase: {
-      type: "boolean",
-      alias: "r",
-      description: "Rebase on the upstream branch if the push is rejected.",
-    },
-    merge: {
-      type: "boolean",
-      alias: "m",
-      description: "Merge the upstream branch if the push is rejected.",
     },
     yes: {
       type: "boolean",
@@ -102,18 +82,6 @@ export const commitCommand = defineCommand({
   },
   async run({ args }) {
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-
-    if (args.rebase && args.merge) {
-      log.error("Choose either --rebase or --merge, not both.");
-      process.exitCode = 1;
-      return;
-    }
-
-    const syncStrategy: SyncStrategy | undefined = args.rebase
-      ? "rebase"
-      : args.merge
-        ? "merge"
-        : undefined;
 
     const type = args.type ? normalizeCommitType(args.type) : undefined;
     if (type === null) {
@@ -125,7 +93,7 @@ export const commitCommand = defineCommand({
     }
 
     let config: ZapdevConfig;
-    let publishSubtreeMode: boolean;
+    let subtrees: SubtreeMapping;
     try {
       resolveHookTimeout();
       config = resolveConfig(process.env, {
@@ -133,13 +101,14 @@ export const commitCommand = defineCommand({
         model: args.model,
         effort: args.effort,
       });
-      publishSubtreeMode = await resolvePublishSubtree(process.cwd(), args["publish-subtree"]);
+      subtrees = await resolveSubtrees(process.cwd());
     } catch (error) {
       log.error(errorMessage(error));
       process.exitCode = 1;
       return;
     }
 
+    const publishSubtreeMode = Object.keys(subtrees).length > 0;
     if (interactive) intro("zapdev commit");
 
     const repos = await findRepos(process.cwd());
@@ -228,17 +197,48 @@ export const commitCommand = defineCommand({
     }
 
     if (shouldPush) {
-      for (const repository of committed) {
+      if (!interactive) {
+        log.error("Pushing requires a terminal to choose each destination branch. Commits remain local.");
+        process.exitCode = 1;
+        return;
+      }
+      let previousSubtreeBranch: string | undefined;
+      for (const { repo, label } of committed) {
         try {
-          const pushed = publishSubtreeMode ? await publishSubtrees(repository) : await pushOptimistic(
-            repository,
-            interactive && !args.yes,
-            syncStrategy,
-          );
-          if (!pushed) process.exitCode = 1;
+          const current = await currentBranch(repo);
+          const destinations: [string, string | null][] = publishSubtreeMode
+            ? Object.entries(subtrees)
+            : [["", await getPushRemote(repo, current)]];
+          for (const [prefix, remote] of destinations) {
+            if (!remote) {
+              log.warn(`${label}: no remote or ambiguous remote choice. Skipping push; commit remains local.`);
+              continue;
+            }
+            if (publishSubtreeMode && !await hasSubtreeChanges(repo, prefix, remote, reportHooks(label))) {
+              log.info(`${label}: no changes in ${prefix}. Skipping.`);
+              continue;
+            }
+            const answer = await text({
+              message: `${label}: branch to push ${publishSubtreeMode ? `${prefix} to ` : "to "}${remote}`,
+              initialValue: publishSubtreeMode ? previousSubtreeBranch ?? current : current,
+              validate: (value) => value?.trim() ? undefined : "Branch cannot be empty.",
+            });
+            if (isCancel(answer)) {
+              outro("Sending cancelled. Remaining commits stay local.");
+              return;
+            }
+            const branch = answer.trim();
+            if (publishSubtreeMode) previousSubtreeBranch = branch;
+            log.info(`${label}: pushing ${publishSubtreeMode ? `${prefix} → ` : ""}${remote}/${branch}`);
+            if (publishSubtreeMode) await publishSubtree(repo, prefix, remote, branch, reportHooks(label));
+            else await push(repo, remote, branch, reportHooks(label));
+            log.success(`${label}: pushed to ${remote}/${branch}`);
+          }
         } catch (error) {
-          reportGitFailure(`${repository.label}: ${publishSubtreeMode ? "publication" : "push"} failed`, error);
+          reportGitFailure(`${label}: ${publishSubtreeMode ? "publication" : "push"} failed`, error);
           process.exitCode = 1;
+          outro("Sending stopped after a Git failure.");
+          return;
         }
       }
     }
@@ -248,9 +248,9 @@ export const commitCommand = defineCommand({
 });
 
 /** Report Git failures without repeating native diagnostics or hook failure statuses. */
-function reportGitFailure(message: string, error: unknown, level: "error" | "warn" = "error"): void {
+function reportGitFailure(message: string, error: unknown): void {
   if (error instanceof GitOutputError && error.hookFailureReported) return;
-  log[level](error instanceof GitOutputError ? message : `${message}: ${errorMessage(error)}`);
+  log.error(error instanceof GitOutputError ? message : `${message}: ${errorMessage(error)}`);
 }
 
 function reportHooks(label: string): HookReporter {
@@ -298,118 +298,5 @@ async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean): Promis
     });
     if (isCancel(edited)) return null;
     action.draft.message = edited.trim();
-  }
-}
-
-async function syncWithUpstream(
-  { repo, label }: Repository,
-  strategy: SyncStrategy,
-): Promise<boolean> {
-  const actionLabel = strategy === "rebase" ? "Rebase" : "Merge";
-  log.info(`${label}: pulling --${strategy === "rebase" ? "rebase" : "no-rebase"}`);
-  try {
-    await (strategy === "rebase" ? pullRebase : pullMerge)(repo, reportHooks(label));
-    log.success(`${label}: ${strategy === "rebase" ? "rebased on upstream" : "merged upstream"}`);
-    return true;
-  } catch (error) {
-    reportGitFailure(`${label}: ${actionLabel} failed (resolve conflicts, then push)`, error);
-    return false;
-  }
-}
-
-async function publishSubtrees({ repo, label }: Repository): Promise<boolean> {
-  const branch = await currentBranch(repo);
-  for (const remote of ["front", "back"]) {
-    log.info(`${label}: publishing projet-${remote} → ${remote}/${branch}`);
-    try {
-      const published = await publishSubtree(repo, remote, branch, reportHooks(label));
-      if (published) log.success(`${label}: published projet-${remote} → ${remote}/${branch}`);
-      else log.info(`${label}: no changes in projet-${remote}. Skipping.`);
-    } catch (error) {
-      reportGitFailure(`${label}: publication to ${remote}/${branch} failed`, error);
-      return false;
-    }
-  }
-  return true;
-}
-
-/** Push optimistically, recovering a behind-upstream rejection once. */
-async function pushOptimistic(
-  repository: Repository,
-  canPrompt: boolean,
-  strategy?: SyncStrategy,
-): Promise<boolean> {
-  const { repo, label } = repository;
-  const [upstream, branch] = await Promise.all([hasUpstream(repo), currentBranch(repo)]);
-  const doPush = (onHook: HookReporter) => (upstream ? push(repo, onHook) : pushSetUpstream(repo, branch, onHook));
-
-  const first = await tryPush(repository, doPush);
-  if (first.ok) return true;
-
-  if (upstream && (await isBehind(repository))) {
-    const syncStrategy = strategy ?? (await chooseSyncStrategy(repository, canPrompt));
-    if (!syncStrategy || !(await syncWithUpstream(repository, syncStrategy))) return false;
-
-    const retry = await tryPush(repository, doPush);
-    if (retry.ok) return true;
-    reportGitFailure(`${label}: push failed`, retry.error);
-    return false;
-  }
-
-  reportGitFailure(`${label}: push failed`, first.error);
-  return false;
-}
-
-async function chooseSyncStrategy({ label }: Repository, interactive: boolean): Promise<SyncStrategy | null> {
-  if (!interactive) {
-    log.error(`${label}: branch is behind upstream. Re-run with --rebase or --merge.`);
-    return null;
-  }
-
-  const action = await select<SyncAction>({
-    message: `${label}: branch is behind upstream. How should zapdev sync it?`,
-    options: [
-      { value: "rebase", label: "Rebase" },
-      { value: "merge", label: "Merge" },
-      { value: "quit", label: "Quit" },
-    ],
-  });
-
-  if (isCancel(action) || action === "quit") {
-    log.warn("Push cancelled. Commit remains local.");
-    return null;
-  }
-
-  return action;
-}
-
-type PushResult = { ok: true } | { ok: false; error: unknown };
-
-async function tryPush({ label }: Repository, doPush: (onHook: HookReporter) => Promise<void>): Promise<PushResult> {
-  log.info(`${label}: pushing`);
-  try {
-    await doPush(reportHooks(label));
-    log.success(`${label}: pushed`);
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error };
-  }
-}
-
-/** Check the upstream after fetching; preserve the original push error if fetching fails. */
-async function isBehind({ repo, label }: Repository): Promise<boolean> {
-  log.info(`${label}: checking upstream`);
-  try {
-    await fetchRemote(repo, reportHooks(label));
-    const behind = await behindCount(repo);
-    log.info(`${label}: ${
-      behind > 0
-        ? `Behind upstream by ${behind} commit${behind > 1 ? "s" : ""}`
-        : "Up to date with upstream"
-    }`);
-    return behind > 0;
-  } catch (error) {
-    reportGitFailure(`${label}: could not check upstream`, error, "warn");
-    return false;
   }
 }

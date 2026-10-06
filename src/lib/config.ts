@@ -1,17 +1,16 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import { errorMessage } from "./errors";
-import type { ZapdevConfig } from "../types/config";
+import type { SubtreeMapping, ZapdevConfig } from "../types/config";
 
-/** Choose subtree publication from an explicit flag or zapdev.json in the launch directory. */
-export async function resolvePublishSubtree(directory: string, override?: boolean): Promise<boolean> {
-  if (override !== undefined) return override;
+/** Read and validate the subtree mapping in the launch directory's zapdev.json. */
+export async function resolveSubtrees(directory: string): Promise<SubtreeMapping> {
   let content: string;
   try {
     content = await readFile(join(directory, "zapdev.json"), "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
     throw new Error(`Unable to read zapdev.json: ${errorMessage(error)}`, { cause: error });
   }
   let config: unknown;
@@ -23,11 +22,25 @@ export async function resolvePublishSubtree(directory: string, override?: boolea
   if (typeof config !== "object" || config === null || Array.isArray(config)) {
     throw new Error("zapdev.json must contain an object.");
   }
-  const isSubtree = (config as Record<string, unknown>).isSubtree;
-  if (isSubtree !== undefined && typeof isSubtree !== "boolean") {
-    throw new Error("zapdev.json isSubtree must be a boolean.");
+  const settings = config as Record<string, unknown>;
+  if (settings.isSubtree !== undefined) {
+    throw new Error("zapdev.json isSubtree is no longer supported; use a subtrees folder-to-remote mapping.");
   }
-  return isSubtree === true;
+  const subtrees = settings.subtrees;
+  if (subtrees === undefined) return {};
+  if (typeof subtrees !== "object" || subtrees === null || Array.isArray(subtrees)) {
+    throw new Error("zapdev.json subtrees must be a folder-to-remote object.");
+  }
+  for (const [prefix, remote] of Object.entries(subtrees as Record<string, unknown>)) {
+    if (prefix !== prefix.trim() || isAbsolute(prefix) || prefix.includes("\\")
+      || prefix.split("/").some((part) => ["", ".", "..", ".git"].includes(part))) {
+      throw new Error(`zapdev.json subtree folder "${prefix}" must be a repository-relative directory.`);
+    }
+    if (typeof remote !== "string" || !remote || /\s/.test(remote) || remote.startsWith("-")) {
+      throw new Error(`zapdev.json subtree "${prefix}" must map to a nonempty Git remote name.`);
+    }
+  }
+  return subtrees as SubtreeMapping;
 }
 
 /** Resolve the per-hook deadline in milliseconds from ZD_HOOK_TIMEOUT (seconds). */

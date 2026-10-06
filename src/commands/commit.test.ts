@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 vi.mock("../lib/git");
 vi.mock("../lib/config", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/config")>(),
-  resolvePublishSubtree: vi.fn(),
+  resolveSubtrees: vi.fn(),
 }));
 vi.mock("../lib/gitleaks");
 vi.mock("../lib/llm", () => ({ generateCommitMessage: vi.fn() }));
@@ -20,13 +20,14 @@ vi.mock("@clack/prompts", () => ({
 
 import { confirm, log, select, spinner, text } from "@clack/prompts";
 import * as git from "../lib/git";
-import { resolvePublishSubtree } from "../lib/config";
+import { resolveSubtrees } from "../lib/config";
 import { GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import { commitCommand } from "./commit";
 
 const repos = ["/repos/front", "/repos/back"];
+const subtrees = { "projet-front": "front", "projet-back": "back" };
 const hookLogOptions = { secondarySymbol: "" };
 const stdinTTY = process.stdin.isTTY;
 const stdoutTTY = process.stdout.isTTY;
@@ -51,10 +52,11 @@ beforeEach(() => {
   process.exitCode = undefined;
   vi.mocked(git.findRepos).mockResolvedValue(repos);
   vi.mocked(git.getStagedDiff).mockImplementation(async (repo) => repo);
-  vi.mocked(git.hasUpstream).mockResolvedValue(true);
   vi.mocked(git.currentBranch).mockResolvedValue("main");
-  vi.mocked(resolvePublishSubtree).mockImplementation(async (_directory, override) => override ?? false);
-  vi.mocked(git.publishSubtree).mockResolvedValue(true);
+  vi.mocked(git.getPushRemote).mockResolvedValue("origin");
+  vi.mocked(resolveSubtrees).mockResolvedValue({});
+  vi.mocked(git.hasSubtreeChanges).mockResolvedValue(true);
+  vi.mocked(text).mockResolvedValue("feature/publish");
   vi.mocked(git.getRepoStatus).mockResolvedValue({ branch: "main", hasChanges: true });
   vi.mocked(hasGitleaks).mockResolvedValue(true);
   vi.mocked(generateCommitMessage).mockImplementation(async (diff) => `fix: ${basename(diff)}`);
@@ -96,13 +98,12 @@ it("honors --staged and skips clean repositories when committing and pushing", a
   expect(git.stageAll).not.toHaveBeenCalled();
   expect(scanStagedChanges).toHaveBeenCalledExactlyOnceWith("/repos/back");
   expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function));
-  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", expect.any(Function));
-  expect(git.fetchRemote).not.toHaveBeenCalled();
+  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "origin", "feature/publish", expect.any(Function));
   expect(confirm).not.toHaveBeenCalled();
 });
 
 it.each([false, true])("skips commit review with --yes but confirms sending (subtree=%s)", async (subtree) => {
-  vi.mocked(resolvePublishSubtree).mockResolvedValue(subtree);
+  vi.mocked(resolveSubtrees).mockResolvedValue(subtree ? subtrees : {});
   vi.mocked(confirm).mockImplementation(async () => {
     expect(git.commit).toHaveBeenCalledTimes(2);
     return true;
@@ -118,8 +119,9 @@ it.each([false, true])("skips commit review with --yes but confirms sending (sub
 });
 
 it.each([false, Symbol("cancel")])("keeps --yes commits local when publication is declined or cancelled: %s", async (answer) => {
+  vi.mocked(resolveSubtrees).mockResolvedValue(subtrees);
   vi.mocked(confirm).mockResolvedValue(answer);
-  await runCommand(commitCommand, { rawArgs: ["-y", "--publish-subtree"] });
+  await runCommand(commitCommand, { rawArgs: ["-y"] });
   expect(git.commit).toHaveBeenCalledTimes(2);
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(git.push).not.toHaveBeenCalled();
@@ -129,7 +131,7 @@ it.each([false, Symbol("cancel")])("keeps --yes commits local when publication i
 it.each([false, true])("never prompts or sends with --yes without a TTY (subtree=%s)", async (subtree) => {
   process.stdin.isTTY = false;
   process.stdout.isTTY = false;
-  vi.mocked(resolvePublishSubtree).mockResolvedValue(subtree);
+  vi.mocked(resolveSubtrees).mockResolvedValue(subtree ? subtrees : {});
   await runCommand(commitCommand, { rawArgs: ["-y"] });
   expect(git.commit).toHaveBeenCalledTimes(2);
   expect(confirm).not.toHaveBeenCalled();
@@ -190,67 +192,89 @@ it("accepts all repos and asks once before pushing only the successful commits",
   vi.mocked(select).mockResolvedValue("all");
   vi.mocked(confirm).mockResolvedValue(true);
   vi.mocked(git.commit).mockRejectedValueOnce(new Error("Hook failed"));
-  vi.mocked(git.hasUpstream).mockResolvedValue(false);
 
   await runCommand(commitCommand, { rawArgs: [] });
 
   expect(git.commit).toHaveBeenCalledTimes(2);
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ message: "Push back (main)?" }));
-  expect(git.pushSetUpstream).toHaveBeenCalledExactlyOnceWith("/repos/back", "main", expect.any(Function));
+  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "origin", "feature/publish", expect.any(Function));
   expect(process.exitCode).toBe(1);
 });
 
-it.each(["flag", "file"])("publishes front and back instead of pushing when enabled by %s", async (source) => {
+it("publishes exactly the configured folders to their mapped remotes", async () => {
   vi.mocked(git.currentBranch).mockResolvedValue("feature/publish");
-  if (source === "file") vi.mocked(resolvePublishSubtree).mockResolvedValue(true);
+  const mapping = { "apps/ui": "frontend", "services/api": "backend" };
+  vi.mocked(resolveSubtrees).mockResolvedValue(mapping);
 
-  await runCommand(commitCommand, { rawArgs: ["--yes", "--push", ...(source === "flag" ? ["--publish-subtree"] : [])] });
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
 
-  expect(resolvePublishSubtree).toHaveBeenCalledExactlyOnceWith(process.cwd(), source === "flag" ? true : undefined);
+  expect(resolveSubtrees).toHaveBeenCalledExactlyOnceWith(process.cwd());
   for (const repo of repos) {
-    for (const remote of ["front", "back"]) {
-      expect(git.publishSubtree).toHaveBeenCalledWith(repo, remote, "feature/publish", expect.any(Function));
+    for (const [prefix, remote] of Object.entries(mapping)) {
+      expect(git.hasSubtreeChanges).toHaveBeenCalledWith(repo, prefix, remote, expect.any(Function));
+      expect(git.publishSubtree).toHaveBeenCalledWith(repo, prefix, remote, "feature/publish", expect.any(Function));
     }
   }
   expect(git.publishSubtree).toHaveBeenCalledTimes(4);
   expect(git.push).not.toHaveBeenCalled();
-  expect(git.pushSetUpstream).not.toHaveBeenCalled();
-});
-
-it("lets --publish-subtree=false override isSubtree=true", async () => {
-  vi.mocked(resolvePublishSubtree).mockImplementation(async (_directory, override) => override ?? true);
-  await runCommand(commitCommand, { rawArgs: ["--yes", "--push", "--publish-subtree=false"] });
-  expect(resolvePublishSubtree).toHaveBeenCalledExactlyOnceWith(process.cwd(), false);
-  expect(git.push).toHaveBeenCalledTimes(2);
-  expect(git.publishSubtree).not.toHaveBeenCalled();
+  expect(text).toHaveBeenCalledTimes(4);
+  expect(git.getPushRemote).not.toHaveBeenCalled();
 });
 
 it("asks to publish, reports unchanged subtrees and does not enable automatic publication", async () => {
+  vi.mocked(resolveSubtrees).mockResolvedValue(subtrees);
   vi.mocked(select).mockResolvedValue("all");
-  vi.mocked(git.publishSubtree).mockResolvedValue(false);
-  await runCommand(commitCommand, { rawArgs: ["--publish-subtree"] });
+  vi.mocked(git.hasSubtreeChanges).mockResolvedValue(false);
+  await runCommand(commitCommand, { rawArgs: [] });
   expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ message: "Publish subtrees in front (main), back (main)?" }));
   expect(git.publishSubtree).not.toHaveBeenCalled();
 
   vi.mocked(confirm).mockResolvedValue(true);
-  await runCommand(commitCommand, { rawArgs: ["--publish-subtree"] });
+  await runCommand(commitCommand, { rawArgs: [] });
   expect(log.info).toHaveBeenCalledWith("front (main): no changes in projet-front. Skipping.");
+  expect(text).not.toHaveBeenCalled();
+  expect(git.publishSubtree).not.toHaveBeenCalled();
 });
 
-it("stops a failed publication without classic push recovery and continues other repos", async () => {
+it("stops all publications after a rejection", async () => {
+  vi.mocked(resolveSubtrees).mockResolvedValue(subtrees);
   vi.mocked(git.publishSubtree).mockRejectedValueOnce(new Error("Publication rejected"));
-  await runCommand(commitCommand, { rawArgs: ["--yes", "--push", "--publish-subtree", "--rebase"] });
-  expect(git.publishSubtree).toHaveBeenCalledTimes(3);
-  expect(log.error).toHaveBeenCalledWith("front (main): publication to front/main failed: Publication rejected");
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
+  expect(git.publishSubtree).toHaveBeenCalledTimes(1);
+  expect(text).toHaveBeenCalledTimes(1);
+  expect(log.error).toHaveBeenCalledWith("front (main): publication failed: Publication rejected");
   expect(git.push).not.toHaveBeenCalled();
-  expect(git.fetchRemote).not.toHaveBeenCalled();
-  expect(git.pullRebase).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);
 });
 
+it("asks separately for each changed subtree and skips unchanged ones before prompting", async () => {
+  vi.mocked(resolveSubtrees).mockResolvedValue(subtrees);
+  vi.mocked(git.hasSubtreeChanges).mockResolvedValueOnce(false);
+  vi.mocked(git.currentBranch).mockResolvedValueOnce("main").mockResolvedValueOnce("fix/api");
+  vi.mocked(text)
+    .mockResolvedValueOnce("  feature/back  ")
+    .mockResolvedValueOnce("feature/other-front")
+    .mockImplementationOnce(async ({ initialValue }) => initialValue!);
+
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
+
+  expect(text).toHaveBeenCalledTimes(3);
+  expect(text).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    message: "front (main): branch to push projet-back to back",
+    initialValue: "main",
+  }));
+  expect(text).toHaveBeenNthCalledWith(2, expect.objectContaining({ initialValue: "feature/back" }));
+  expect(text).toHaveBeenNthCalledWith(3, expect.objectContaining({ initialValue: "feature/other-front" }));
+  expect(vi.mocked(git.publishSubtree).mock.calls).toEqual([
+    ["/repos/front", "projet-back", "back", "feature/back", expect.any(Function)],
+    ["/repos/back", "projet-front", "front", "feature/other-front", expect.any(Function)],
+    ["/repos/back", "projet-back", "back", "feature/other-front", expect.any(Function)],
+  ]);
+});
+
 it("rejects invalid zapdev.json before staging or committing", async () => {
-  vi.mocked(resolvePublishSubtree).mockRejectedValue(new Error("Invalid zapdev.json"));
+  vi.mocked(resolveSubtrees).mockRejectedValue(new Error("Invalid zapdev.json"));
   await runCommand(commitCommand, { rawArgs: ["--yes"] });
   expect(git.findRepos).not.toHaveBeenCalled();
   expect(git.stageAll).not.toHaveBeenCalled();
@@ -259,8 +283,9 @@ it("rejects invalid zapdev.json before staging or committing", async () => {
 });
 
 it("does not publish from detached HEAD", async () => {
+  vi.mocked(resolveSubtrees).mockResolvedValue(subtrees);
   vi.mocked(git.currentBranch).mockRejectedValue(new Error("HEAD is not a symbolic ref"));
-  await runCommand(commitCommand, { rawArgs: ["--yes", "--push", "--publish-subtree"] });
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
   expect(git.publishSubtree).not.toHaveBeenCalled();
   expect(git.push).not.toHaveBeenCalled();
   expect(log.error).toHaveBeenCalledWith("front (main): publication failed: HEAD is not a symbolic ref");
@@ -276,39 +301,83 @@ it.each(["cancel", Symbol("cancel")])("leaves every repo uncommitted on cancella
   expect(confirm).not.toHaveBeenCalled();
 });
 
-it("scopes push recovery to the rejected repository", async () => {
-  vi.mocked(git.push).mockRejectedValueOnce(new Error("Behind upstream"));
-  vi.mocked(git.behindCount).mockResolvedValue(1);
+it("always asks for a destination and pushes the trimmed input to each resolved remote", async () => {
+  vi.mocked(git.getPushRemote).mockResolvedValueOnce("upstream").mockResolvedValueOnce("server");
+  vi.mocked(text).mockResolvedValueOnce("  feature/front  ").mockResolvedValueOnce("feature/back");
 
-  await runCommand(commitCommand, { rawArgs: ["--yes", "--push", "--rebase"] });
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
 
-  expect(git.fetchRemote).toHaveBeenCalledExactlyOnceWith("/repos/front", expect.any(Function));
-  expect(git.pullRebase).toHaveBeenCalledExactlyOnceWith("/repos/front", expect.any(Function));
-  expect(vi.mocked(git.push).mock.calls).toEqual([
-    ["/repos/front", expect.any(Function)], ["/repos/front", expect.any(Function)], ["/repos/back", expect.any(Function)],
-  ]);
+  expect(text).toHaveBeenCalledTimes(2);
+  expect(text).toHaveBeenCalledWith(expect.objectContaining({
+    message: "front (main): branch to push to upstream",
+    initialValue: "main",
+  }));
+  expect(git.push).toHaveBeenCalledWith("/repos/front", "upstream", "feature/front", expect.any(Function));
+  expect(git.push).toHaveBeenCalledWith("/repos/back", "server", "feature/back", expect.any(Function));
 });
 
-it.each(["commit", "push", "fetch", "rebase", "merge", "retry"])("does not repeat native Git diagnostics during %s", async (operation) => {
+it("warns and skips an unresolved remote without prompting, then sends the next repo", async () => {
+  vi.mocked(git.getPushRemote).mockResolvedValueOnce(null).mockResolvedValueOnce("server");
+
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
+
+  expect(git.commit).toHaveBeenCalledTimes(2);
+  expect(log.warn).toHaveBeenCalledWith("front (main): no remote or ambiguous remote choice. Skipping push; commit remains local.");
+  expect(text).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    message: "back (main): branch to push to server",
+  }));
+  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "server", "feature/publish", expect.any(Function));
+  expect(select).not.toHaveBeenCalled();
+  expect(process.exitCode).toBeUndefined();
+});
+
+it("stops all remaining sends after Git rejects a push", async () => {
+  vi.mocked(text).mockResolvedValue("feature/publish");
+  vi.mocked(git.push).mockRejectedValueOnce(new Error("non-fast-forward"));
+
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
+
+  expect(git.push).toHaveBeenCalledTimes(1);
+  expect(text).toHaveBeenCalledTimes(1);
+  expect(select).not.toHaveBeenCalled();
+  expect(process.exitCode).toBe(1);
+});
+
+it("stops sending when a destination input is cancelled", async () => {
+  vi.mocked(text).mockResolvedValue(Symbol("cancel"));
+
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
+
+  expect(git.commit).toHaveBeenCalledTimes(2);
+  expect(text).toHaveBeenCalledTimes(1);
+  expect(git.push).not.toHaveBeenCalled();
+  expect(process.exitCode).toBeUndefined();
+});
+
+it.each([false, true])("refuses --push without a terminal (subtree=%s)", async (subtree) => {
+  process.stdin.isTTY = false;
+  process.stdout.isTTY = false;
+  vi.mocked(resolveSubtrees).mockResolvedValue(subtree ? subtrees : {});
+
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
+
+  expect(text).not.toHaveBeenCalled();
+  expect(git.push).not.toHaveBeenCalled();
+  expect(git.publishSubtree).not.toHaveBeenCalled();
+  expect(process.exitCode).toBe(1);
+});
+
+it.each(["commit", "push", "publication"])("does not repeat native Git diagnostics during %s", async (operation) => {
+  vi.mocked(resolveSubtrees).mockResolvedValue(operation === "publication" ? subtrees : {});
   vi.mocked(git.findRepos).mockResolvedValue([repos[0]!]);
   const error = new GitOutputError("Native Git diagnostic");
   if (operation === "commit") vi.mocked(git.commit).mockRejectedValueOnce(error);
-  else {
-    vi.mocked(git.push).mockRejectedValueOnce(operation === "push" ? error : new Error("Behind upstream"));
-    vi.mocked(git.behindCount).mockResolvedValue(operation === "push" ? 0 : 1);
-    if (operation === "fetch") vi.mocked(git.fetchRemote).mockRejectedValueOnce(error);
-    if (operation === "rebase") vi.mocked(git.pullRebase).mockRejectedValueOnce(error);
-    if (operation === "merge") vi.mocked(git.pullMerge).mockRejectedValueOnce(error);
-    if (operation === "retry") vi.mocked(git.push).mockRejectedValueOnce(error);
-  }
+  else if (operation === "push") vi.mocked(git.push).mockRejectedValueOnce(error);
+  else vi.mocked(git.publishSubtree).mockRejectedValueOnce(error);
 
-  await runCommand(commitCommand, { rawArgs: ["--yes", "--push", operation === "merge" ? "--merge" : "--rebase"] });
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
 
-  const status = operation === "commit" ? "commit failed"
-    : operation === "fetch" ? "could not check upstream"
-    : operation === "rebase" || operation === "merge" ? `${operation === "rebase" ? "Rebase" : "Merge"} failed (resolve conflicts, then push)`
-    : "push failed";
-  expect(operation === "fetch" ? log.warn : log.error).toHaveBeenCalledWith(`front (main): ${status}`);
+  expect(log.error).toHaveBeenCalledWith(`front (main): ${operation} failed`);
   const messages = [...vi.mocked(log.error).mock.calls, ...vi.mocked(log.warn).mock.calls].flat();
   expect(messages.join("\n")).not.toContain("Native Git diagnostic");
   expect(process.exitCode).toBe(1);
@@ -361,7 +430,7 @@ it.each([true, false])("shows actual hook progress and results with TTY=%s", asy
     onHook!({ name: "commit-msg", phase: "exit", exitCode: 3 });
     throw new Error("Invalid commit message");
   });
-  vi.mocked(git.push).mockImplementation(async (_repo, onHook) => {
+  vi.mocked(git.push).mockImplementation(async (_repo, _remote, _branch, onHook) => {
     onHook!({ name: "pre-push", phase: "start" });
     onHook!({ name: "pre-push", phase: "exit", exitCode: 0 });
   });
@@ -370,13 +439,14 @@ it.each([true, false])("shows actual hook progress and results with TTY=%s", asy
 
   expect(log.success).toHaveBeenCalledWith("front (main): pre-commit: completed", hookLogOptions);
   expect(log.error).toHaveBeenCalledWith("front (main): commit-msg: failed (exit 3)", hookLogOptions);
-  expect(log.success).toHaveBeenCalledWith("back (main): pre-push: completed", hookLogOptions);
+  if (interactive) expect(log.success).toHaveBeenCalledWith("back (main): pre-push: completed", hookLogOptions);
+  else expect(git.push).not.toHaveBeenCalled();
   expect(log.error).toHaveBeenCalledWith("front (main): commit failed: Invalid commit message");
   expect(process.exitCode).toBe(1);
   expect(spinner).toHaveBeenCalledTimes(interactive ? 1 : 0);
   expect(log.step).toHaveBeenCalledWith("front (main): pre-commit", hookLogOptions);
   expect(log.step).toHaveBeenCalledWith("front (main): commit-msg", hookLogOptions);
-  expect(log.step).toHaveBeenCalledWith("back (main): pre-push", hookLogOptions);
+  if (interactive) expect(log.step).toHaveBeenCalledWith("back (main): pre-push", hookLogOptions);
 });
 
 it("rejects an invalid hook timeout before preparing repositories", async () => {
@@ -385,30 +455,4 @@ it("rejects an invalid hook timeout before preparing repositories", async () => 
   expect(log.error).toHaveBeenCalledWith(expect.stringContaining("ZD_HOOK_TIMEOUT"));
   expect(git.findRepos).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);
-});
-
-it.each(["rebase", "merge"])("observes hooks during fetch, %s and push retry", async (strategy) => {
-  vi.mocked(git.findRepos).mockResolvedValue([repos[0]!]);
-  vi.mocked(git.push).mockRejectedValueOnce(new Error("Behind upstream"));
-  vi.mocked(git.behindCount).mockResolvedValue(1);
-  vi.mocked(git.fetchRemote).mockImplementation(async (_repo, onHook) => {
-    onHook!({ name: "reference-transaction", phase: "start" });
-    onHook!({ name: "reference-transaction", phase: "exit", exitCode: 0 });
-  });
-  vi.mocked(strategy === "rebase" ? git.pullRebase : git.pullMerge).mockImplementation(async (_repo, onHook) => {
-    onHook!({ name: strategy === "rebase" ? "pre-rebase" : "post-merge", phase: "start" });
-    onHook!({ name: strategy === "rebase" ? "pre-rebase" : "post-merge", phase: "exit", exitCode: 0 });
-  });
-  vi.mocked(git.push).mockImplementationOnce(async (_repo, onHook) => {
-    onHook!({ name: "pre-push", phase: "start" });
-    onHook!({ name: "pre-push", phase: "exit", exitCode: 0 });
-  });
-
-  await runCommand(commitCommand, { rawArgs: ["--yes", "--push", `--${strategy}`] });
-
-  expect(log.success).toHaveBeenCalledWith("front (main): reference-transaction: completed", hookLogOptions);
-  expect(log.success).toHaveBeenCalledWith(`front (main): ${strategy === "rebase" ? "pre-rebase" : "post-merge"}: completed`, hookLogOptions);
-  expect(log.success).toHaveBeenCalledWith("front (main): pre-push: completed", hookLogOptions);
-  expect(git.push).toHaveBeenCalledTimes(2);
-  expect(spinner).toHaveBeenCalledTimes(1);
 });

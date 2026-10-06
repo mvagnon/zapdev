@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { x } from "tinyexec";
 
-import { commit, findRepos, getRepoStatus, getStagedDiff, publishSubtree, push, stageAll } from "./git";
+import { commit, findRepos, getPushRemote, getRepoStatus, getStagedDiff, hasSubtreeChanges, publishSubtree, push, stageAll } from "./git";
 import type { HookEvent } from "../types/git";
 
 const exec = promisify(execFile);
@@ -238,11 +238,11 @@ it("reports an actual pre-push hook and its exit code", async () => {
   const remote = join(root, "remote.git");
   await exec("git", ["init", "--quiet", "--bare", remote]);
   await exec("git", ["remote", "add", "origin", remote], { cwd: root });
-  await exec("git", ["config", "push.default", "current"], { cwd: root });
+  const { stdout: branch } = await exec("git", ["branch", "--show-current"], { cwd: root });
   await writeFile(join(hooks, "pre-push"), "#!/bin/sh\necho 'pre-push diagnostic' >&2\nexit 5\n", { mode: 0o755 });
   const events: HookEvent[] = [];
 
-  await expect(push(root, (event) => events.push(event))).rejects.toThrow("pre-push diagnostic");
+  await expect(push(root, "origin", branch.trim(), (event) => events.push(event))).rejects.toThrow("pre-push diagnostic");
 
   expect(events).toEqual([
     { name: "pre-push", phase: "start" },
@@ -261,43 +261,98 @@ async function initSubtrees(): Promise<void> {
     await stageAll(source);
     await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "initial"], { cwd: source });
     await exec("git", ["remote", "add", remote, source], { cwd: root });
-    await exec("git", ["subtree", "add", `--prefix=projet-${remote}`, remote, "main", "--squash"], { cwd: root });
+    await exec("git", ["subtree", "add", `--prefix=packages/${remote}`, remote, "main", "--squash"], { cwd: root });
   }
 }
 
 it("publishes only committed subtree contents, skips unchanged subtrees and preserves hooks", async () => {
   await initSubtrees();
-  await writeFile(join(root, "projet-front", "file.txt"), "published change");
-  await exec("git", ["add", "projet-front/file.txt"], { cwd: root });
+  await writeFile(join(root, "packages", "front", "file.txt"), "published change");
+  await exec("git", ["add", "packages/front/file.txt"], { cwd: root });
   await commit(root, "feat: front change");
-  await writeFile(join(root, "projet-front", "file.txt"), "uncommitted change");
+  await writeFile(join(root, "packages", "front", "file.txt"), "uncommitted change");
   await writeFile(join(root, "hooks", "pre-push"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   const events: HookEvent[] = [];
 
-  await expect(publishSubtree(root, "front", "feature/publish", (event) => events.push(event))).resolves.toBe(true);
-  await expect(publishSubtree(root, "back", "feature/publish")).resolves.toBe(false);
+  await expect(hasSubtreeChanges(root, "packages/front", "front")).resolves.toBe(true);
+  await expect(hasSubtreeChanges(root, "packages/back", "back")).resolves.toBe(false);
+  await publishSubtree(root, "packages/front", "front", "feature/destination", (event) => events.push(event));
   const source = join(root, "source-front");
-  const published = await exec("git", ["show", "feature/publish:file.txt"], { cwd: source });
+  const published = await exec("git", ["show", "feature/destination:file.txt"], { cwd: source });
   expect(published.stdout).toBe("published change");
-  const files = await exec("git", ["ls-tree", "--name-only", "feature/publish"], { cwd: source });
+  const files = await exec("git", ["ls-tree", "--name-only", "feature/destination"], { cwd: source });
   expect(files.stdout.trim()).toBe("file.txt");
-  await expect(exec("git", ["rev-parse", "--verify", "feature/publish"], { cwd: join(root, "source-back") })).rejects.toThrow();
+  await expect(exec("git", ["rev-parse", "--verify", "feature/destination"], { cwd: join(root, "source-back") })).rejects.toThrow();
   expect(events).toContainEqual({ name: "pre-push", phase: "exit", exitCode: 0 });
 
-  await exec("git", ["branch", "--force", "feature/publish", "main"], { cwd: source });
-  await exec("git", ["checkout", "--quiet", "feature/publish"], { cwd: source });
+  await exec("git", ["checkout", "--quiet", "feature/destination"], { cwd: source });
   await writeFile(join(source, "file.txt"), "remote-only change");
   await stageAll(source);
   await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "diverging change"], { cwd: source });
-  const beforePush = await exec("git", ["rev-parse", "feature/publish"], { cwd: source });
+  const beforePush = await exec("git", ["rev-parse", "feature/destination"], { cwd: source });
   await exec("git", ["checkout", "--quiet", "main"], { cwd: source });
-  await expect(publishSubtree(root, "front", "feature/publish")).rejects.toThrow();
-  const remoteHead = await exec("git", ["rev-parse", "feature/publish"], { cwd: source });
+  await expect(publishSubtree(root, "packages/front", "front", "feature/destination")).rejects.toThrow();
+  const remoteHead = await exec("git", ["rev-parse", "feature/destination"], { cwd: source });
   expect(remoteHead.stdout).toBe(beforePush.stdout);
 }, 15_000);
 
-it("refuses main and invalid branch names before fetching", async () => {
+it("refuses main and invalid branch names before publication", async () => {
   await initRepo(root);
-  await expect(publishSubtree(root, "front", "main")).rejects.toThrow("Refusing to publish directly to main");
-  await expect(publishSubtree(root, "front", "invalid..branch")).rejects.toThrow("valid branch");
+  await expect(publishSubtree(root, "packages/front", "front", "main")).rejects.toThrow("Refusing to publish directly to main");
+  await expect(publishSubtree(root, "packages/front", "front", "invalid..branch")).rejects.toThrow("valid branch");
+});
+
+it("pushes the input branch to the selected remote without changing its upstream", async () => {
+  await configureHooks();
+  await commit(root, "fix: initial");
+  const origin = join(root, "origin.git");
+  const other = join(root, "other.git");
+  for (const [name, path] of [["origin", origin], ["other", other]] as const) {
+    await exec("git", ["init", "--quiet", "--bare", path]);
+    await exec("git", ["remote", "add", name, path], { cwd: root });
+  }
+  await exec("git", ["checkout", "--quiet", "-b", "feature/input"], { cwd: root });
+  await exec("git", ["push", "--quiet", "-u", "origin", "feature/input"], { cwd: root });
+  await exec("git", ["checkout", "--quiet", "-b", "feature/current"], { cwd: root });
+  await writeFile(join(root, "file.txt"), "current branch change");
+  await stageAll(root);
+  await commit(root, "feat: current");
+
+  await push(root, "other", "feature/input");
+
+  const local = await exec("git", ["rev-parse", "feature/input"], { cwd: root });
+  const remote = await exec("git", ["rev-parse", "feature/input"], { cwd: other });
+  expect(remote.stdout).toBe(local.stdout);
+  const upstream = await exec("git", ["rev-parse", "--symbolic-full-name", "feature/input@{upstream}"], { cwd: root });
+  expect(upstream.stdout.trim()).toBe("refs/remotes/origin/feature/input");
+  await expect(exec("git", ["rev-parse", "--verify", "feature/current"], { cwd: other })).rejects.toThrow();
+});
+
+it.each(["", "--force", "invalid..branch", "main:other"])("rejects invalid push input before sending: %s", async (branch) => {
+  await initRepo(root);
+  await expect(push(root, "origin", branch)).rejects.toThrow();
+});
+
+it.each([{ remotes: [] }, { remotes: ["server"] }, { remotes: ["origin", "server"] }])("resolves only an unambiguous remote without an upstream: $remotes", async ({ remotes }) => {
+  await initRepo(root);
+  for (const remote of remotes) await exec("git", ["remote", "add", remote, join(root, `${remote}.git`)], { cwd: root });
+
+  await expect(getPushRemote(root, "feature/current")).resolves.toBe(remotes.length === 1 ? remotes[0] : null);
+});
+
+it("prefers the current branch's upstream remote even when its tracking ref is missing", async () => {
+  await configureHooks();
+  await commit(root, "fix: initial");
+  await exec("git", ["checkout", "--quiet", "-b", "feature/current"], { cwd: root });
+  for (const remote of ["origin", "team/server"]) {
+    await exec("git", ["remote", "add", remote, join(root, "remote.git")], { cwd: root });
+  }
+  await exec("git", ["config", "branch.feature/current.remote", "team/server"], { cwd: root });
+  await exec("git", ["config", "branch.feature/current.merge", "refs/heads/main"], { cwd: root });
+  await exec("git", ["config", "branch.feature/current.pushRemote", "origin"], { cwd: root });
+
+  await expect(getPushRemote(root, "feature/current")).resolves.toBe("team/server");
+
+  await exec("git", ["config", "branch.feature/current.remote", "."], { cwd: root });
+  await expect(getPushRemote(root, "feature/current")).resolves.toBeNull();
 });
