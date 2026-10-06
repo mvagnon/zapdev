@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/mvagnon/zapdev/compare/v1.17.0...v1.18.0) (2026-10-06)
+
+
+### Features
+
+* Improve error handling and flow control for parallel operations ([84578e2](https://github.com/mvagnon/zapdev/commit/84578e2d294a98a0b007184722c456ee0d5aadf0))
+
 ## [1.17.0](https://github.com/mvagnon/zapdev/compare/v1.16.0...v1.17.0) (2026-10-06)
 
 
