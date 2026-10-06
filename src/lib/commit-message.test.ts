@@ -39,6 +39,10 @@ describe("sanitizeCommitMessage", () => {
   it("returns an empty string for empty input", () => {
     expect(sanitizeCommitMessage("")).toBe("");
   });
+
+  it.each(["feat!: remove the old API", "feat(api)!: remove the old API"])("preserves the breaking change marker in %s", (message) => {
+    expect(sanitizeCommitMessage(`\`${message}\`\nExplanation`)).toBe(message);
+  });
 });
 
 describe("applyCommitType", () => {
@@ -48,5 +52,11 @@ describe("applyCommitType", () => {
 
   it("injects the forced type into the prompt", () => {
     expect(applyCommitType("BASE", "fix")).toContain("fix");
+  });
+
+  it("separates the forced type from its breaking change marker", () => {
+    const prompt = applyCommitType("BASE", "feat!");
+    expect(prompt).toContain('The type MUST be exactly "feat".');
+    expect(prompt).toContain('Include "!" immediately before ":" to mark a breaking change.');
   });
 });

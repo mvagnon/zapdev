@@ -125,7 +125,7 @@ zapdev commit
 | `--url <url>`       | Override the complete Chat Completions endpoint                                  |
 | `--model <model>`   | Override the model                                                               |
 | `--effort <effort>` | Override the reasoning effort                                                    |
-| `-t, --type <type>` | Force an exact lowercase Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
+| `-t, --type <type>` | Force a lowercase Conventional Commit type; append `!` for a breaking change |
 | `-p, --push`        | Skip push confirmation and push the current branch                               |
 | `--no-push`, `--push=false` | Keep commits local without push confirmation                            |
 | `--pull`           | Pull fast-forward updates only in repositories with changes to commit and an upstream remote |
@@ -134,11 +134,15 @@ zapdev commit
 
 ```bash
 zapdev commit -t feat      # force the type
+zapdev commit -t deps      # dependency changes
+zapdev commit -t 'feat!'   # force a breaking change
 zapdev commit --staged     # leave unstaged changes untouched
 zapdev commit -y           # commit automatically, then ask before pushing
 zapdev commit -yp          # skip review and push confirmation; choose a branch if protected
 zapdev commit --pull       # pull first, then follow the normal commit flow
 ```
+
+Supported types: `feat`, `fix`, `deps`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`, each also available with `!`. Breaking changes use `feat!: description` or `feat(scope)!: description`, compatible with Release Please.
 
 Before contacting the LLM endpoint, zapdev runs `gitleaks git --staged --verbose` in each changed repository when Gitleaks is installed. A failed scan never sends that repository's diff to the LLM and stops the flow before any commit; when Gitleaks is absent, the scan is skipped. The staged diff is sent to the configured endpoint, which may be remote.
 

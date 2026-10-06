@@ -1,7 +1,9 @@
 import type { CommitType } from "../types/commit";
 
+/** Force the commit type and, when requested, its breaking change marker. */
 export function applyCommitType(systemPrompt: string, type: CommitType): string {
-  return `${systemPrompt}\n\nThe type MUST be exactly "${type}".`;
+  const breaking = type.endsWith("!");
+  return `${systemPrompt}\n\nThe type MUST be exactly "${breaking ? type.slice(0, -1) : type}".${breaking ? '\nInclude "!" immediately before ":" to mark a breaking change.' : ""}`;
 }
 
 export const MAX_DIFF_CHARS = 12_000;

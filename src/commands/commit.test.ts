@@ -730,12 +730,12 @@ it("rejects an invalid hook timeout before preparing repositories", async () => 
   expect(process.exitCode).toBe(1);
 });
 
-it("passes a valid explicit type to message generation", async () => {
-  await runCommand(commitCommand, { rawArgs: ["--yes", "--type", "feat"] });
-  expect(generateCommitMessage).toHaveBeenCalledWith("/repos/front", expect.any(Object), "feat");
+it.each(["feat", "deps", "feat!", "fix!", "refactor!", "deps!"])("passes the explicit type %s to message generation", async (type) => {
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--type", type] });
+  expect(generateCommitMessage).toHaveBeenCalledWith("/repos/front", expect.any(Object), type);
 });
 
-it.each(["FEAT", " feat ", "banana", ""])("rejects noncanonical commit types through Citty before staging: %j", async (type) => {
+it.each(["FEAT", " feat ", "banana", "", "feat!!", "!feat", "feat(scope)!"])("rejects noncanonical commit types through Citty before staging: %j", async (type) => {
   await expect(runCommand(commitCommand, { rawArgs: ["--yes", "--type", type] })).rejects.toThrow("Invalid value for argument");
   expect(git.stageAll).not.toHaveBeenCalled();
   expect(generateCommitMessage).not.toHaveBeenCalled();

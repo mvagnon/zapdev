@@ -1,6 +1,7 @@
 export const COMMIT_TYPES = [
   "feat",
   "fix",
+  "deps",
   "chore",
   "docs",
   "style",
@@ -12,4 +13,4 @@ export const COMMIT_TYPES = [
   "revert",
 ] as const;
 
-export type CommitType = (typeof COMMIT_TYPES)[number];
+export type CommitType = (typeof COMMIT_TYPES)[number] | `${(typeof COMMIT_TYPES)[number]}!`;

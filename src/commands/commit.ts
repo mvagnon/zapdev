@@ -62,10 +62,10 @@ export const commitCommand = defineCommand({
     },
     type: {
       type: "enum",
-      options: [...COMMIT_TYPES],
+      options: COMMIT_TYPES.flatMap((type) => [type, `${type}!` as const]),
       required: false,
       alias: "t",
-      description: `Force the Conventional Commits type (${COMMIT_TYPES.join(", ")}).`,
+      description: `Force the Conventional Commits type (${COMMIT_TYPES.join(", ")}); append ! for a breaking change.`,
     },
     push: {
       type: "boolean",
