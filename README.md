@@ -42,7 +42,7 @@ flowchart LR
 | `ZD_URL`          | For `commit` | Complete HTTP(S) Chat Completions endpoint, including its path                                      |
 | `ZD_MODEL`        | For `commit` | Model identifier supported by the endpoint                                                          |
 | `ZD_EFFORT`       | For `commit` | Sent as `reasoning_effort`; use a value supported by your model, such as `low`, `medium`, or `high` |
-| `ZD_HOOK_TIMEOUT` | No           | Deadline per Git hook in seconds (default: `60`); positive numbers from `0.001` to `2147483.647` |
+| `ZD_HOOK_TIMEOUT` | No           | Deadline per Git hook in seconds (default: `60`); positive numbers from `0.001` to `2147483.647`    |
 
 The LLM settings have no defaults, automatic provider detection, or backup models. CLI flags override these settings. Legacy `OLLAMA_*` variables are no longer read.
 
@@ -119,15 +119,15 @@ Repositories with no new changes can still send existing commits. Unselected or 
 zapdev commit
 ```
 
-| Flag                | Description                                                       |
-| ------------------- | ----------------------------------------------------------------- |
-| `--url <url>`       | Override the complete Chat Completions endpoint                   |
-| `--model <model>`   | Override the model                                                |
-| `--effort <effort>` | Override the reasoning effort                                     |
+| Flag                | Description                                                                      |
+| ------------------- | -------------------------------------------------------------------------------- |
+| `--url <url>`       | Override the complete Chat Completions endpoint                                  |
+| `--model <model>`   | Override the model                                                               |
+| `--effort <effort>` | Override the reasoning effort                                                    |
 | `-t, --type <type>` | Force an exact lowercase Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
-| `-p, --push`        | Skip push confirmation and push the current branch                |
-| `-s, --staged`      | Commit only changes that are already staged                       |
-| `-y, --yes`         | Skip commit review; still confirm push unless `--push` is set     |
+| `-p, --push`        | Skip push confirmation and push the current branch                               |
+| `-s, --staged`      | Commit only changes that are already staged                                      |
+| `-y, --yes`         | Skip commit review; still confirm push unless `--push` is set                    |
 
 ```bash
 zapdev commit -t feat      # force the type
@@ -161,9 +161,9 @@ Place an optional `zapdev.json` in the directory where you launch zapdev:
 }
 ```
 
-| `zapdev.json` option | Default | Effect |
-| ------------------- | ------- | ------ |
-| `subtrees` | `{}` | Map repository-relative folders to Git remote names. A nonempty mapping replaces classic push with subtree publication. |
+| `zapdev.json` option | Default | Effect                                                                                                                  |
+| -------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `subtrees`           | `{}`    | Map repository-relative folders to Git remote names. A nonempty mapping replaces classic push with subtree publication. |
 
 - **Scope:** only the launch directory's file is read, not parents or child repositories. Its mapping applies to newly committed repositories and repositories without new changes.
 - **Configuration:** only `zapdev.json` selects subtree mode; no subtree CLI flag. Missing or empty `subtrees` uses classic push. Invalid configuration stops the command before staging. Replace the removed `isSubtree` option with an explicit mapping.
@@ -189,11 +189,11 @@ zapdev subtree-init my-project \
   --origin git@github.com:org/project.git
 ```
 
-| Parameter | Effect |
-| --------- | ------ |
-| `<directory>` | Repository to create or extend. New repositories start on `main`; existing branches are kept. |
-| `<name=url>...` | One or more sources. Each name is both the subtree folder and its Git remote name. |
-| `--origin <url>` | Optional parent repository remote; replaces the shell helper's `remote=url` argument. |
+| Parameter        | Effect                                                                                        |
+| ---------------- | --------------------------------------------------------------------------------------------- |
+| `<directory>`    | Repository to create or extend. New repositories start on `main`; existing branches are kept. |
+| `<name=url>...`  | One or more sources. Each name is both the subtree folder and its Git remote name.            |
+| `--origin <url>` | Optional parent repository remote; replaces the shell helper's `remote=url` argument.         |
 
 - Requires a clean working tree, including untracked files. Existing folders, conflicting mappings or remote URLs, and a symlinked `zapdev.json` are refused before importing any subtree.
 - Detects each source's default branch, falling back to `main` with a warning when unavailable; imports with `git subtree add --squash`.
@@ -209,8 +209,8 @@ Add the following tasks to `.zed/tasks.json`:
 ```json
 [
   {
-    "label": "Safely commit staged changes.",
-    "command": "zapdev commit -s",
+    "label": "zapdev commit",
+    "command": "zapdev commit --yes",
     "reveal": "always",
     "hide": "on_success",
     "reveal_target": "center"
@@ -224,10 +224,7 @@ Add this entry to Zed's `keymap.json` to run the commit task with `ctrl-cmd-ente
 {
   "context": "Pane",
   "bindings": {
-    "ctrl-cmd-enter": [
-      "task::Spawn",
-      { "task_name": "Safely commit staged changes." }
-    ]
+    "ctrl-cmd-enter": ["task::Spawn", { "task_name": "zapdev commit" }]
   }
 }
 ```
