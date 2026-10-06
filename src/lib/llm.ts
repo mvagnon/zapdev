@@ -51,17 +51,10 @@ export async function generateCommitMessage(
 }
 
 function describeRequestError(error: unknown): string {
-  if (errorName(error) === "TimeoutError") {
+  if (error instanceof Error && error.name === "TimeoutError") {
     return `LLM did not answer within ${REQUEST_TIMEOUT_MS / 1000}s.`;
   }
   return "Could not complete the LLM request. Check URL and endpoint availability.";
-}
-
-function errorName(error: unknown): string | null {
-  if (error && typeof error === "object" && "name" in error && typeof error.name === "string") {
-    return error.name;
-  }
-  return null;
 }
 
 function serverError(body: unknown): string | null {

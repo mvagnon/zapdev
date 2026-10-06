@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { x } from "tinyexec";
 
-import { commit, currentBranch, findRepos, getPushRemote, getRepoStatus, getStagedDiff, git, hasUnpushedCommits, publishSubtree, push, stageAll } from "./git";
+import { commit, currentBranch, findRepos, getPushRemote, getRepoStatus, getStagedDiff, git, hasUnpushedCommits, push, stageAll } from "./git";
 import type { HookEvent } from "../types/git";
 
 const exec = promisify(execFile);
@@ -284,7 +284,7 @@ it("publishes only committed subtree contents, skips unchanged subtrees and pres
   await expect(hasUnpushedCommits(root, "front", "feature/new", undefined, "packages/front")).resolves.toBe(true);
   await expect(hasUnpushedCommits(root, "back", "feature/new", undefined, "packages/back")).resolves.toBe(false);
   await expect(hasUnpushedCommits(root, "missing-remote", "main", undefined, "packages/front")).rejects.toThrow();
-  await publishSubtree(root, "packages/front", "front", "feature/destination", (event) => events.push(event));
+  await push(root, "front", "feature/destination", (event) => events.push(event), "packages/front");
   const source = join(root, "source-front");
   const published = await exec("git", ["show", "feature/destination:file.txt"], { cwd: source });
   expect(published.stdout).toBe("published change");
@@ -301,7 +301,7 @@ it("publishes only committed subtree contents, skips unchanged subtrees and pres
   await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "diverging change"], { cwd: source });
   const beforePush = await exec("git", ["rev-parse", "feature/destination"], { cwd: source });
   await exec("git", ["checkout", "--quiet", "main"], { cwd: source });
-  await expect(publishSubtree(root, "packages/front", "front", "feature/destination")).rejects.toThrow();
+  await expect(push(root, "front", "feature/destination", undefined, "packages/front")).rejects.toThrow();
   const remoteHead = await exec("git", ["rev-parse", "feature/destination"], { cwd: source });
   expect(remoteHead.stdout).toBe(beforePush.stdout);
 }, 15_000);
@@ -330,15 +330,14 @@ it.each([false, true])("allows pushing to main (subtree=%s)", async (subtree) =>
   const remote = join(root, "main.git");
   await exec("git", ["init", "--quiet", "--bare", remote]);
   await git(["remote", "add", "destination", remote], root);
-  if (subtree) await publishSubtree(root, "packages/front", "destination", "main");
-  else await push(root, "destination", "main");
+  await push(root, "destination", "main", undefined, subtree ? "packages/front" : undefined);
   const path = subtree ? "file.txt" : "packages/front/file.txt";
   expect(await git(["show", `main:${path}`], remote)).toBe("main change");
 }, 15_000);
 
 it("refuses invalid branch names before publication", async () => {
   await initRepo(root);
-  await expect(publishSubtree(root, "packages/front", "front", "invalid..branch")).rejects.toThrow("valid branch");
+  await expect(push(root, "front", "invalid..branch", undefined, "packages/front")).rejects.toThrow("valid branch");
 });
 
 it("pushes HEAD to a new destination without changing local branches or their upstream", async () => {

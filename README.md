@@ -124,7 +124,7 @@ zapdev commit
 | `--url <url>`       | Override the complete Chat Completions endpoint                   |
 | `--model <model>`   | Override the model                                                |
 | `--effort <effort>` | Override the reasoning effort                                     |
-| `-t, --type <type>` | Force the Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
+| `-t, --type <type>` | Force an exact lowercase Conventional Commit type (`feat`, `fix`, `chore`, etc.) |
 | `-p, --push`        | Skip push confirmation; still ask for each destination branch      |
 | `-s, --staged`      | Commit only changes that are already staged                       |
 | `-y, --yes`         | Skip commit review; still confirm push unless `--push` is set     |

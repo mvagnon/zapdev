@@ -136,10 +136,12 @@ export async function getPushRemote(repo: string, branch: string): Promise<strin
   return remotes.length === 1 ? remotes[0]! : null;
 }
 
-/** Push current HEAD to a destination branch without changing local branches or their upstreams. */
-export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter, onNativeOutput?: NativeOutputReporter): Promise<void> {
+/** Push committed repository or subtree history without force or changes to local branches and upstreams. */
+export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter, prefix?: string, onNativeOutput?: NativeOutputReporter): Promise<void> {
   await git(["check-ref-format", "--branch", branch], repo);
-  await git(["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook, onNativeOutput);
+  await git(prefix
+    ? ["subtree", "push", `--prefix=${prefix}`, remote, branch]
+    : ["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook, onNativeOutput);
 }
 
 /** Check committed history against the presumed destination, falling back to the remote's default branch. */
@@ -154,12 +156,6 @@ export async function hasUnpushedCommits(repo: string, remote: string, branch: s
   if (!target) return true;
   await git(["fetch", "--quiet", "--", remote, target], repo, onHook, onNativeOutput);
   return Boolean((await git(["rev-list", "--max-count=1", `FETCH_HEAD..${source}`], repo)).trim());
-}
-
-/** Push committed subtree contents to the requested branch without force. */
-export async function publishSubtree(repo: string, prefix: string, remote: string, branch: string, onHook?: HookReporter, onNativeOutput?: NativeOutputReporter): Promise<void> {
-  await git(["check-ref-format", "--branch", branch], repo);
-  await git(["subtree", "push", `--prefix=${prefix}`, remote, branch], repo, onHook, onNativeOutput);
 }
 
 /** Find the enclosing working tree, or only direct child working trees outside a repo. */

@@ -1,11 +1,4 @@
-import { COMMIT_TYPES, type CommitType } from "../types/commit";
-
-export function normalizeCommitType(input: string): CommitType | null {
-  const normalized = input.trim().toLowerCase();
-  return (COMMIT_TYPES as readonly string[]).includes(normalized)
-    ? (normalized as CommitType)
-    : null;
-}
+import type { CommitType } from "../types/commit";
 
 export function applyCommitType(systemPrompt: string, type: CommitType): string {
   return `${systemPrompt}\n\nThe type MUST be exactly "${type}".`;

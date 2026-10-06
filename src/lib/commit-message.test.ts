@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   applyCommitType,
   MAX_DIFF_CHARS,
-  normalizeCommitType,
   sanitizeCommitMessage,
   truncateDiff,
 } from "./commit-message";
@@ -39,24 +38,6 @@ describe("sanitizeCommitMessage", () => {
 
   it("returns an empty string for empty input", () => {
     expect(sanitizeCommitMessage("")).toBe("");
-  });
-});
-
-describe("normalizeCommitType", () => {
-  it("accepts a valid type", () => {
-    expect(normalizeCommitType("feat")).toBe("feat");
-  });
-
-  it("lowercases and trims the input", () => {
-    expect(normalizeCommitType("  FEAT  ")).toBe("feat");
-  });
-
-  it("returns null for an unknown type", () => {
-    expect(normalizeCommitType("banana")).toBeNull();
-  });
-
-  it("returns null for empty input", () => {
-    expect(normalizeCommitType("")).toBeNull();
   });
 });
 

@@ -14,7 +14,6 @@ import {
   text,
 } from "@clack/prompts";
 
-import { normalizeCommitType } from "../lib/commit-message";
 import { resolveConfig, resolveHookTimeout, resolveSubtrees } from "../lib/config";
 import {
   commit as gitCommit,
@@ -24,7 +23,6 @@ import {
   getRepoStatus,
   getStagedDiff,
   hasUnpushedCommits,
-  publishSubtree,
   push,
   stageAll,
 } from "../lib/git";
@@ -61,7 +59,9 @@ export const commitCommand = defineCommand({
       description: "Override $ZD_EFFORT, sent as reasoning_effort.",
     },
     type: {
-      type: "string",
+      type: "enum",
+      options: [...COMMIT_TYPES],
+      required: false,
       alias: "t",
       description: `Force the Conventional Commits type (${COMMIT_TYPES.join(", ")}).`,
     },
@@ -83,15 +83,6 @@ export const commitCommand = defineCommand({
   },
   async run({ args }) {
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-
-    const type = args.type ? normalizeCommitType(args.type) : undefined;
-    if (type === null) {
-      log.error(
-        `Invalid type "${args.type}". Valid types: ${COMMIT_TYPES.join(", ")}.`,
-      );
-      process.exitCode = 1;
-      return;
-    }
 
     let config: ZapdevConfig;
     let subtrees: SubtreeMapping;
@@ -141,7 +132,7 @@ export const commitCommand = defineCommand({
       const diff = await getStagedDiff(repo);
       if (!diff.trim()) return null;
       if (scan) await scanStagedChanges(repo);
-      const message = await generateCommitMessage(diff, config, type);
+      const message = await generateCommitMessage(diff, config, args.type);
       if (!message) throw new Error("The model returned an empty message.");
       return { ...repository, message };
     }));
@@ -167,19 +158,19 @@ export const commitCommand = defineCommand({
       return;
     }
 
-    const committed: CommitDraft[] = [];
+    const toSend: Repository[] = [];
     for (const draft of selected) {
       log.info(`${draft.label}: committing`);
       try {
         await gitCommit(draft.repo, draft.message, reportHooks(draft.label), reportNativeOutput);
-        committed.push(draft);
+        toSend.push(draft);
         log.success(`${draft.label}: committed ${draft.message}`);
       } catch (error) {
         reportGitFailure(`${draft.pendingLabel}: commit failed`, error);
         process.exitCode = 1;
       }
     }
-    const toSend: Repository[] = [...committed, ...unchanged];
+    toSend.push(...unchanged);
     if (toSend.length === 0) return;
 
     let shouldPush = Boolean(args.push);
@@ -202,8 +193,7 @@ export const commitCommand = defineCommand({
         return;
       }
       let previousBranchInput = "";
-      for (const repository of toSend) {
-        const { repo, label } = repository;
+      for (const { repo, label } of toSend) {
         try {
           const current = await currentBranch(repo);
           const destinations: [string, string | null][] = publishSubtreeMode
@@ -230,8 +220,7 @@ export const commitCommand = defineCommand({
             previousBranchInput = answer.trim();
             const branch = previousBranchInput || current;
             log.info(`${label}: pushing ${publishSubtreeMode ? `${prefix} → ` : ""}${remote}/${branch}`);
-            if (publishSubtreeMode) await publishSubtree(repo, prefix, remote, branch, reportHooks(label), reportNativeOutput);
-            else await push(repo, remote, branch, reportHooks(label), reportNativeOutput);
+            await push(repo, remote, branch, reportHooks(label), prefix || undefined, reportNativeOutput);
             log.success(`${label}: pushed to ${remote}/${branch}`);
           }
         } catch (error) {
