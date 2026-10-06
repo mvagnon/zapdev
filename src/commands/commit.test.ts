@@ -16,6 +16,7 @@ vi.mock("@clack/prompts", () => ({
   isCancel: (value: unknown) => typeof value === "symbol",
   log: { info: vi.fn(), step: vi.fn(), warn: vi.fn(), error: vi.fn(), message: vi.fn(), success: vi.fn() },
   spinner: vi.fn(),
+  S_BAR_END: "└", S_BAR_START: "┌",
 }));
 
 import { confirm, log, select, spinner, text } from "@clack/prompts";
@@ -25,10 +26,11 @@ import { GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import { commitCommand } from "./commit";
+import { reportNativeOutput } from "./native-output";
 
 const repos = ["/repos/front", "/repos/back"];
 const subtrees = { "projet-front": "front", "projet-back": "back" };
-const hookLogOptions = { secondarySymbol: "" };
+const hookLogOptions = { secondarySymbol: "", withGuide: false };
 const stdinTTY = process.stdin.isTTY;
 const stdoutTTY = process.stdout.isTTY;
 const stdoutGetColorDepth = process.stdout.getColorDepth;
@@ -84,8 +86,8 @@ it("generates all messages concurrently before committing any repository", async
   expect(git.stageAll).toHaveBeenCalledTimes(2);
   expect(scanStagedChanges).toHaveBeenCalledWith("/repos/front");
   expect(scanStagedChanges).toHaveBeenCalledWith("/repos/back");
-  expect(git.commit).toHaveBeenCalledWith("/repos/front", "fix: front", expect.any(Function));
-  expect(git.commit).toHaveBeenCalledWith("/repos/back", "fix: back", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledWith("/repos/front", "fix: front", expect.any(Function), reportNativeOutput);
+  expect(git.commit).toHaveBeenCalledWith("/repos/back", "fix: back", expect.any(Function), reportNativeOutput);
   expect(select).not.toHaveBeenCalled();
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(git.push).not.toHaveBeenCalled();
@@ -98,8 +100,8 @@ it.each([false, true])("honors --staged and only sends clean repositories with u
 
   expect(git.stageAll).not.toHaveBeenCalled();
   expect(scanStagedChanges).toHaveBeenCalledExactlyOnceWith("/repos/back");
-  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function));
-  expect(git.push).toHaveBeenCalledWith("/repos/back", "origin", "feature/publish", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function), reportNativeOutput);
+  expect(git.push).toHaveBeenCalledWith("/repos/back", "origin", "feature/publish", expect.any(Function), reportNativeOutput);
   expect(git.push).toHaveBeenCalledTimes(pending ? 2 : 1);
   expect(confirm).not.toHaveBeenCalled();
 });
@@ -126,8 +128,8 @@ it.each([false, true])("uses the current branch for cleared input, retaining the
   expect(text).toHaveBeenNthCalledWith(1, expect.objectContaining({ initialValue: "" }));
   expect(text).toHaveBeenNthCalledWith(2, expect.objectContaining({ initialValue: "feature/previous" }));
   if (subtree) expect(text).toHaveBeenNthCalledWith(3, expect.objectContaining({ initialValue: "" }));
-  if (subtree) expect(git.publishSubtree).toHaveBeenCalledWith("/repos/front", "projet-back", "back", "feature/current", expect.any(Function));
-  else expect(git.push).toHaveBeenCalledWith("/repos/back", "origin", "feature/current", expect.any(Function));
+  if (subtree) expect(git.publishSubtree).toHaveBeenCalledWith("/repos/front", "projet-back", "back", "feature/current", expect.any(Function), reportNativeOutput);
+  else expect(git.push).toHaveBeenCalledWith("/repos/back", "origin", "feature/current", expect.any(Function), reportNativeOutput);
   expect(process.exitCode).toBeUndefined();
 });
 
@@ -140,7 +142,7 @@ it.each([false, true])("reuses the previous input across repositories (subtree=%
   expect(text).toHaveBeenNthCalledWith(2, expect.objectContaining({ initialValue: "feature/shared" }));
   const send = subtree ? git.publishSubtree : git.push;
   expect(send).toHaveBeenCalledTimes(2);
-  expect(vi.mocked(send).mock.calls.map((args) => args.at(-2))).toEqual(["feature/shared", "feature/shared"]);
+  expect(vi.mocked(send).mock.calls.map((args) => args[subtree ? 3 : 2])).toEqual(["feature/shared", "feature/shared"]);
 });
 
 it.each([false, true])("keeps empty inputs empty and sends to each repository's current branch, including main (subtree=%s)", async (subtree) => {
@@ -151,7 +153,7 @@ it.each([false, true])("keeps empty inputs empty and sends to each repository's 
   expect(text).toHaveBeenCalledTimes(2);
   for (const [options] of vi.mocked(text).mock.calls) expect(options.initialValue).toBe("");
   const send = subtree ? git.publishSubtree : git.push;
-  expect(vi.mocked(send).mock.calls.map((args) => args.at(-2))).toEqual(["main", "fix/api"]);
+  expect(vi.mocked(send).mock.calls.map((args) => args[subtree ? 3 : 2])).toEqual(["main", "fix/api"]);
   expect(process.exitCode).toBeUndefined();
 });
 
@@ -200,7 +202,7 @@ it("never sends a failed secret scan to the LLM and still processes the other re
 
   expect(generateCommitMessage).toHaveBeenCalledTimes(1);
   expect(generateCommitMessage).toHaveBeenCalledWith("/repos/back", expect.any(Object), undefined);
-  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function), reportNativeOutput);
   expect(process.exitCode).toBe(1);
 });
 
@@ -212,7 +214,7 @@ it("edits one repo, then commits only that repo with its edited message", async 
 
   await runCommand(commitCommand, { rawArgs: [] });
 
-  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: edited back", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: edited back", expect.any(Function), reportNativeOutput);
   expect(select).toHaveBeenCalledWith(expect.objectContaining({
     options: expect.arrayContaining([
       expect.objectContaining({ label: 'Commit only "back (main)"' }),
@@ -251,7 +253,7 @@ it("accepts all repos and asks once before pushing only the successful commits",
   expect(git.commit).toHaveBeenCalledTimes(2);
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ message: "Push back (main)?" }));
-  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "origin", "feature/publish", expect.any(Function));
+  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "origin", "feature/publish", expect.any(Function), reportNativeOutput);
   expect(process.exitCode).toBe(1);
 });
 
@@ -265,8 +267,8 @@ it("publishes exactly the configured folders to their mapped remotes", async () 
   expect(resolveSubtrees).toHaveBeenCalledExactlyOnceWith(process.cwd());
   for (const repo of repos) {
     for (const [prefix, remote] of Object.entries(mapping)) {
-      expect(git.hasUnpushedCommits).toHaveBeenCalledWith(repo, remote, "feature/publish", expect.any(Function), prefix);
-      expect(git.publishSubtree).toHaveBeenCalledWith(repo, prefix, remote, "feature/publish", expect.any(Function));
+      expect(git.hasUnpushedCommits).toHaveBeenCalledWith(repo, remote, "feature/publish", expect.any(Function), prefix, reportNativeOutput);
+      expect(git.publishSubtree).toHaveBeenCalledWith(repo, prefix, remote, "feature/publish", expect.any(Function), reportNativeOutput);
     }
   }
   expect(git.publishSubtree).toHaveBeenCalledTimes(4);
@@ -320,9 +322,9 @@ it("asks separately for each changed subtree and skips unchanged ones before pro
   expect(text).toHaveBeenNthCalledWith(2, expect.objectContaining({ initialValue: "feature/back" }));
   expect(text).toHaveBeenNthCalledWith(3, expect.objectContaining({ initialValue: "feature/other-front" }));
   expect(vi.mocked(git.publishSubtree).mock.calls).toEqual([
-    ["/repos/front", "projet-back", "back", "feature/back", expect.any(Function)],
-    ["/repos/back", "projet-front", "front", "feature/other-front", expect.any(Function)],
-    ["/repos/back", "projet-back", "back", "feature/other-front", expect.any(Function)],
+    ["/repos/front", "projet-back", "back", "feature/back", expect.any(Function), reportNativeOutput],
+    ["/repos/back", "projet-front", "front", "feature/other-front", expect.any(Function), reportNativeOutput],
+    ["/repos/back", "projet-back", "back", "feature/other-front", expect.any(Function), reportNativeOutput],
   ]);
 });
 
@@ -334,10 +336,25 @@ it.each([false, true])("checks the presumed destination before each input, inclu
   await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
   const remote = subtree ? "front" : "origin";
   const prefix = subtree ? "projet-front" : undefined;
-  expect(git.hasUnpushedCommits).toHaveBeenNthCalledWith(1, "/repos/front", remote, "main", expect.any(Function), prefix);
-  expect(git.hasUnpushedCommits).toHaveBeenNthCalledWith(2, "/repos/back", remote, "feature/shared", expect.any(Function), prefix);
+  expect(git.hasUnpushedCommits).toHaveBeenNthCalledWith(1, "/repos/front", remote, "main", expect.any(Function), prefix, reportNativeOutput);
+  expect(git.hasUnpushedCommits).toHaveBeenNthCalledWith(2, "/repos/back", remote, "feature/shared", expect.any(Function), prefix, reportNativeOutput);
   expect(text).toHaveBeenCalledTimes(1);
   expect(subtree ? git.publishSubtree : git.push).toHaveBeenCalledTimes(1);
+});
+
+it.each([false, true])("shows the check step after confirmation and before detection (subtree=%s)", async (subtree) => {
+  vi.mocked(git.findRepos).mockResolvedValue([repos[0]!]);
+  vi.mocked(resolveSubtrees).mockResolvedValue(subtree ? { "projet-front": "front" } : {});
+  vi.mocked(confirm).mockResolvedValue(true);
+  vi.mocked(git.hasUnpushedCommits).mockImplementation(async () => {
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(log.info).toHaveBeenCalledWith(`front (main): checking unpublished commits${subtree ? " in projet-front" : ""} (${subtree ? "front" : "origin"}/main).`);
+    expect(text).not.toHaveBeenCalled();
+    return false;
+  });
+  await runCommand(commitCommand, { rawArgs: ["--yes"] });
+  expect(git.hasUnpushedCommits).toHaveBeenCalledTimes(1);
+  expect(process.exitCode).toBeUndefined();
 });
 
 it("rejects invalid zapdev.json before staging or committing", async () => {
@@ -379,8 +396,8 @@ it("always asks for a destination and pushes the trimmed input to each resolved 
     message: "front (main): branch to push to upstream",
     initialValue: "",
   }));
-  expect(git.push).toHaveBeenCalledWith("/repos/front", "upstream", "feature/front", expect.any(Function));
-  expect(git.push).toHaveBeenCalledWith("/repos/back", "server", "feature/back", expect.any(Function));
+  expect(git.push).toHaveBeenCalledWith("/repos/front", "upstream", "feature/front", expect.any(Function), reportNativeOutput);
+  expect(git.push).toHaveBeenCalledWith("/repos/back", "server", "feature/back", expect.any(Function), reportNativeOutput);
 });
 
 it("warns and skips an unresolved remote without prompting, then sends the next repo", async () => {
@@ -393,7 +410,7 @@ it("warns and skips an unresolved remote without prompting, then sends the next 
   expect(text).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     message: "back (main): branch to push to server",
   }));
-  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "server", "feature/publish", expect.any(Function));
+  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "server", "feature/publish", expect.any(Function), reportNativeOutput);
   expect(select).not.toHaveBeenCalled();
   expect(process.exitCode).toBeUndefined();
 });
@@ -480,7 +497,7 @@ it.each(["empty", "error"])("skips a repo whose generation returns %s", async (f
 
   await runCommand(commitCommand, { rawArgs: [] });
 
-  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function), reportNativeOutput);
   expect(select).not.toHaveBeenCalled();
   expect(git.push).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);

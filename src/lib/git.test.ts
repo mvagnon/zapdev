@@ -190,7 +190,7 @@ if (!(await getStagedDiff(${JSON.stringify(root)})).includes("change")) throw ne
 try {
   await commit(${JSON.stringify(root)}, "fix: interactive", ${JSON.stringify(mode)} === "failure" ? (event) => {
     if (event.phase === "exit" && event.exitCode !== 0) console.log("HOOK_FAILURE_STATUS");
-  } : undefined);
+   } : undefined, (phase) => console.log("NATIVE_" + phase));
   console.log("INTERACTIVE_DONE");
 } catch (error) {
   if (${JSON.stringify(mode)} === "timeout") {
@@ -222,6 +222,10 @@ try {
   expect(result.stderr).toBe("");
   expect(result.exitCode, result.stdout).toBe(0);
   expect(result.stdout).toContain("HOOK_LOG");
+  expect(result.stdout.match(/NATIVE_start/g)).toHaveLength(1);
+  expect(result.stdout.match(/NATIVE_exit/g)).toHaveLength(1);
+  expect(result.stdout.indexOf("NATIVE_start")).toBeLessThan(result.stdout.indexOf("HOOK_LOG"));
+  expect(result.stdout.indexOf("NATIVE_exit")).toBeGreaterThan(result.stdout.indexOf("HOOK_LOG"));
   expect(result.stdout).toContain(mode === "answer" ? "HOOK_ANSWER=y" : mode === "timeout" ? "TIMEOUT_OK" : "NATIVE_FAILURE_OK");
   if (mode === "failure") expect(result.stdout.match(/HOOK_DIAGNOSTIC/g)).toHaveLength(1);
   if (mode === "silent-failure") expect(result.stdout).not.toContain("HOOK_DIAGNOSTIC");
@@ -277,7 +281,8 @@ it("publishes only committed subtree contents, skips unchanged subtrees and pres
 
   await expect(hasUnpushedCommits(root, "front", "main", undefined, "packages/front")).resolves.toBe(true);
   await expect(hasUnpushedCommits(root, "back", "master", undefined, "packages/back")).resolves.toBe(false);
-  await expect(hasUnpushedCommits(root, "back", "feature/new", undefined, "packages/back")).resolves.toBe(true);
+  await expect(hasUnpushedCommits(root, "front", "feature/new", undefined, "packages/front")).resolves.toBe(true);
+  await expect(hasUnpushedCommits(root, "back", "feature/new", undefined, "packages/back")).resolves.toBe(false);
   await expect(hasUnpushedCommits(root, "missing-remote", "main", undefined, "packages/front")).rejects.toThrow();
   await publishSubtree(root, "packages/front", "front", "feature/destination", (event) => events.push(event));
   const source = join(root, "source-front");
@@ -372,7 +377,9 @@ it("detects unpushed commits against the requested remote branch, ignoring upstr
   const branch = await currentBranch(root);
   await expect(hasUnpushedCommits(root, "origin", branch)).resolves.toBe(true);
   await push(root, "origin", branch);
+  await git(["symbolic-ref", "HEAD", `refs/heads/${branch}`], remote);
   await expect(hasUnpushedCommits(root, "origin", branch)).resolves.toBe(false);
+  await expect(hasUnpushedCommits(root, "origin", "feature/new")).resolves.toBe(false);
   await git(["checkout", "--quiet", "-b", "feature/local", "--track", `origin/${branch}`], root);
   await writeFile(join(root, "file.txt"), "pending change");
   await git(["add", "file.txt"], root);
@@ -380,7 +387,7 @@ it("detects unpushed commits against the requested remote branch, ignoring upstr
   await expect(hasUnpushedCommits(root, "origin", "feature/local")).resolves.toBe(true);
   await push(root, "origin", branch);
   await expect(hasUnpushedCommits(root, "origin", branch)).resolves.toBe(false);
-  await expect(hasUnpushedCommits(root, "origin", "feature/local")).resolves.toBe(true);
+  await expect(hasUnpushedCommits(root, "origin", "feature/local")).resolves.toBe(false);
   await git(["update-ref", "-d", `refs/heads/${branch}`], remote);
   await expect(hasUnpushedCommits(root, "origin", branch)).resolves.toBe(true);
 });

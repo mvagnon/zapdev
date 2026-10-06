@@ -2,12 +2,16 @@ import { runCommand } from "citty";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("../lib/subtree-init", () => ({ initializeSubtrees: vi.fn(), parseSubtreeSources: vi.fn() }));
-vi.mock("@clack/prompts", () => ({ intro: vi.fn(), outro: vi.fn(), log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock("@clack/prompts", () => ({
+  intro: vi.fn(), outro: vi.fn(), S_BAR_END: "└", S_BAR_START: "┌",
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), message: vi.fn() },
+}));
 
 import { log } from "@clack/prompts";
 import { GitOutputError } from "../lib/errors";
 import { initializeSubtrees, parseSubtreeSources } from "../lib/subtree-init";
 import { subtreeInitCommand } from "./subtree-init";
+import { reportNativeOutput } from "./native-output";
 
 const sources = [{ name: "front", url: "front-url" }, { name: "back", url: "back-url" }];
 const exitCode = process.exitCode;
@@ -25,7 +29,7 @@ it("parses multiple sources and --origin independently of option order", async (
 
   expect(parseSubtreeSources).toHaveBeenCalledExactlyOnceWith(["front=front-url", "back=back-url"]);
   expect(initializeSubtrees).toHaveBeenCalledExactlyOnceWith("project", sources, {
-    origin: "parent-url", onProgress: log.info, onWarning: log.warn,
+    origin: "parent-url", onProgress: log.info, onWarning: log.warn, onNativeOutput: reportNativeOutput,
   });
 });
 

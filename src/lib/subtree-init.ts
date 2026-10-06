@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { readProjectConfig } from "./config";
 import { commit, getRepoStatus, getStagedDiff, git, tryGit } from "./git";
 import type { SubtreeSource } from "../types/subtree";
+import type { NativeOutputReporter } from "../types/git";
 
 /** Parse unique name=url sources, keeping equals signs inside repository URLs. */
 export function parseSubtreeSources(entries: string[]): SubtreeSource[] {
@@ -28,7 +29,7 @@ export function parseSubtreeSources(entries: string[]): SubtreeSource[] {
 export async function initializeSubtrees(
   directory: string,
   sources: SubtreeSource[],
-  options: { origin?: string; onProgress?: (message: string) => void; onWarning?: (message: string) => void } = {},
+  options: { origin?: string; onProgress?: (message: string) => void; onWarning?: (message: string) => void; onNativeOutput?: NativeOutputReporter } = {},
 ): Promise<void> {
   if (!directory.trim()) throw new Error("Directory cannot be empty.");
   if (options.origin !== undefined && (!options.origin.trim() || options.origin.startsWith("-") || options.origin.includes("\0"))) {
@@ -67,7 +68,7 @@ export async function initializeSubtrees(
   const imports: (SubtreeSource & { branch: string })[] = [];
   for (const source of sources) {
     options.onProgress?.(`Detecting default branch for ${source.name}`);
-    const refs = await git(["ls-remote", "--symref", "--", source.url, "HEAD"], repo);
+    const refs = await git(["ls-remote", "--symref", "--", source.url, "HEAD"], repo, undefined, options.onNativeOutput);
     const branch = /^ref: refs\/heads\/(.+)\tHEAD$/m.exec(refs)?.[1];
     if (!branch) options.onWarning?.(`Could not detect default branch for ${source.name}; using main.`);
     imports.push({ ...source, branch: branch ?? "main" });
@@ -78,12 +79,12 @@ export async function initializeSubtrees(
   await writeFile(configPath, `${JSON.stringify({ ...settings, subtrees: Object.fromEntries(mapping) }, null, 2)}\n`);
   await git(["add", "--", "zapdev.json"], repo);
   if (initial || (await getStagedDiff(repo)).trim()) {
-    await commit(repo, initial ? "chore: init" : "chore: configure subtrees");
+    await commit(repo, initial ? "chore: init" : "chore: configure subtrees", undefined, options.onNativeOutput);
   }
   for (const [name, url] of missingRemotes) await git(["remote", "add", name, url], repo);
   for (const { name, branch } of imports) {
     options.onProgress?.(`Adding ${name} (${branch})`);
-    await git(["subtree", "add", `--prefix=${name}`, name, branch, "--squash"], repo);
+    await git(["subtree", "add", `--prefix=${name}`, name, branch, "--squash"], repo, undefined, options.onNativeOutput);
   }
 }
 

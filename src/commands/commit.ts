@@ -34,6 +34,7 @@ import { generateCommitMessage } from "../lib/llm";
 import { COMMIT_TYPES } from "../types/commit";
 import type { SubtreeMapping, ZapdevConfig } from "../types/config";
 import type { HookReporter } from "../types/git";
+import { reportNativeOutput } from "./native-output";
 
 type Repository = { repo: string; label: string; pendingLabel: string };
 type CommitDraft = Repository & { message: string };
@@ -170,7 +171,7 @@ export const commitCommand = defineCommand({
     for (const draft of selected) {
       log.info(`${draft.label}: committing`);
       try {
-        await gitCommit(draft.repo, draft.message, reportHooks(draft.label));
+        await gitCommit(draft.repo, draft.message, reportHooks(draft.label), reportNativeOutput);
         committed.push(draft);
         log.success(`${draft.label}: committed ${draft.message}`);
       } catch (error) {
@@ -213,7 +214,8 @@ export const commitCommand = defineCommand({
               log.warn(`${label}: no remote or ambiguous remote choice. Skipping push; commit remains local.`);
               continue;
             }
-            if (!await hasUnpushedCommits(repo, remote, previousBranchInput || current, reportHooks(label), prefix || undefined)) {
+            log.info(`${label}: checking unpublished commits${prefix ? ` in ${prefix}` : ""} (${remote}/${previousBranchInput || current}).`);
+            if (!await hasUnpushedCommits(repo, remote, previousBranchInput || current, reportHooks(label), prefix || undefined, reportNativeOutput)) {
               log.info(`${label}: no unpushed commits${prefix ? ` in ${prefix}` : ""}. Skipping.`);
               continue;
             }
@@ -228,8 +230,8 @@ export const commitCommand = defineCommand({
             previousBranchInput = answer.trim();
             const branch = previousBranchInput || current;
             log.info(`${label}: pushing ${publishSubtreeMode ? `${prefix} → ` : ""}${remote}/${branch}`);
-            if (publishSubtreeMode) await publishSubtree(repo, prefix, remote, branch, reportHooks(label));
-            else await push(repo, remote, branch, reportHooks(label));
+            if (publishSubtreeMode) await publishSubtree(repo, prefix, remote, branch, reportHooks(label), reportNativeOutput);
+            else await push(repo, remote, branch, reportHooks(label), reportNativeOutput);
             log.success(`${label}: pushed to ${remote}/${branch}`);
           }
         } catch (error) {
@@ -252,7 +254,7 @@ function reportGitFailure(message: string, error: unknown): void {
 }
 
 function reportHooks(label: string): HookReporter {
-  const options = { secondarySymbol: "" };
+  const options = { secondarySymbol: "", withGuide: false };
   return (event) => {
     const hook = `${label}: ${event.name}`;
     if (event.phase === "start") {
