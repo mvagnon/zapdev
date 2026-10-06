@@ -9,13 +9,13 @@ import { x } from "tinyexec";
 import { resolveHookTimeout } from "./config";
 import { GitOutputError } from "./errors";
 import { createHookReporter } from "./git-hooks";
-import type { DiffStats, HookReporter } from "../types/git";
+import type { DiffStats, GitOutputReporter, HookReporter } from "../types/git";
 
 /** Run Git directly, preserving terminal output and enforcing native hook deadlines. */
-export async function git(args: string[], cwd: string, onHook?: HookReporter): Promise<string> {
+export async function git(args: string[], cwd: string, onHook?: HookReporter, onOutput?: GitOutputReporter): Promise<string> {
   const timeout = resolveHookTimeout();
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY
-    && ["commit", "pull", "push", "fetch", "ls-remote"].includes(args[0] ?? ""));
+    && ["commit", "pull", "push"].includes(args[0] ?? ""));
   const terminalState = interactive && process.platform !== "win32"
     ? execFileSync("stty", ["-g"], { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim()
     : undefined;
@@ -24,9 +24,14 @@ export async function git(args: string[], cwd: string, onHook?: HookReporter): P
       cwd,
       detached: !interactive && process.platform !== "win32",
       env: { ...process.env, GIT_TRACE2_EVENT: "3" },
-      stdio: interactive ? ["inherit", args[0] === "ls-remote" ? "pipe" : "inherit", "inherit", "pipe"] : ["pipe", "pipe", "pipe", "pipe"],
+      stdio: interactive ? ["inherit", onOutput ? "pipe" : "inherit", onOutput ? "pipe" : "inherit", "pipe"] : ["pipe", "pipe", "pipe", "pipe"],
     },
   });
+  if (onOutput) {
+    for (const stream of ["stdout", "stderr"] as const) {
+      child.process?.[stream]?.setEncoding("utf8").on("data", (chunk: string) => onOutput(chunk, stream));
+    }
+  }
   let timeoutError: Error | undefined;
   let hookFailureReported = false;
   const { report, close } = createHookReporter((event) => {
@@ -54,7 +59,7 @@ export async function git(args: string[], cwd: string, onHook?: HookReporter): P
     if (timeoutError) throw timeoutError;
     if (result.exitCode !== 0) {
       const message = result.stderr.trim() || `git ${args.join(" ")} failed`;
-      if (interactive) throw new GitOutputError(message, hookFailureReported);
+      if (interactive || onOutput) throw new GitOutputError(message, hookFailureReported);
       throw new Error(message);
     }
     return result.stdout;
@@ -115,8 +120,8 @@ export async function getStagedDiffStats(repo: string): Promise<DiffStats> {
 }
 
 /** Commit the staged changes in the given repository. */
-export async function commit(repo: string, message: string, onHook?: HookReporter): Promise<void> {
-  await git(["commit", "--quiet", "-m", message], repo, onHook);
+export async function commit(repo: string, message: string, onHook?: HookReporter, onOutput?: GitOutputReporter): Promise<void> {
+  await git(["commit", "--quiet", "-m", message], repo, onHook, onOutput);
 }
 
 /** Resolve the current branch, failing for a detached HEAD. */
@@ -151,22 +156,9 @@ export async function getPushRemote(repo: string, branch: string): Promise<strin
 }
 
 /** Push committed repository history without force or changes to local branches and upstreams. */
-export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter): Promise<void> {
+export async function push(repo: string, remote: string, branch: string, onHook?: HookReporter, onOutput?: GitOutputReporter): Promise<void> {
   await git(["check-ref-format", "--branch", branch], repo);
-  await git(["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook);
-}
-
-/** Check committed history against the current branch's destination, falling back to the remote's default branch. */
-export async function hasUnpushedCommits(repo: string, remote: string, branch: string, onHook?: HookReporter): Promise<boolean> {
-  if (await tryGit(["rev-parse", "--verify", "HEAD"], repo) === null) return false;
-  await git(["check-ref-format", "--branch", branch], repo);
-  const ref = `refs/heads/${branch}`;
-  const refs = new Set((await git(["ls-remote", "--", remote, ref, "HEAD"], repo, onHook))
-    .trim().split("\n").map((line) => line.split("\t")[1]));
-  const target = refs.has(ref) ? ref : refs.has("HEAD") ? "HEAD" : null;
-  if (!target) return true;
-  await git(["fetch", "--quiet", "--", remote, target], repo, onHook);
-  return Boolean((await git(["rev-list", "--max-count=1", "FETCH_HEAD..HEAD"], repo)).trim());
+  await git(["push", "--", remote, `HEAD:refs/heads/${branch}`], repo, onHook, onOutput);
 }
 
 /** Find the enclosing working tree, or only direct child working trees outside a repo. */

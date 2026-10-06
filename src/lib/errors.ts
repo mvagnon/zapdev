@@ -1,4 +1,4 @@
-/** A failed Git command with terminal-inherited output. */
+/** A failed Git command whose diagnostics have already been displayed. */
 export class GitOutputError extends Error {
   constructor(message: string, readonly hookFailureReported: boolean = false) {
     super(message);

@@ -8,3 +8,6 @@ export type HookEvent =
 
 /** Receive hook progress without changing how Git executes the hook. */
 export type HookReporter = (event: HookEvent) => void;
+
+/** Receive decoded live output from Git's stdout or stderr. */
+export type GitOutputReporter = (chunk: string, stream: "stdout" | "stderr") => void;

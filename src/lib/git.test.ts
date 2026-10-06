@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { x } from "tinyexec";
 
-import { commit, currentBranch, findRepos, getPushRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, hasUnpushedCommits, push, stageAll, switchBranch } from "./git";
+import { commit, currentBranch, findRepos, getPushRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, push, stageAll, switchBranch } from "./git";
 import type { HookEvent } from "../types/git";
 
 const exec = promisify(execFile);
@@ -185,6 +185,33 @@ exit 9
   ]);
 });
 
+it.each([0, 3])("streams captured stdout and stderr live, including partial lines (exit %s)", async (exitCode) => {
+  const hooks = await configureHooks();
+  let statusOutput = "";
+  const status = await git(["status", "--short"], root, undefined, (chunk) => { statusOutput += chunk; });
+  expect(statusOutput).toBe(status);
+  expect(statusOutput).toContain("file.txt");
+  await writeFile(join(hooks, "pre-commit"), `#!/bin/sh
+printf 'HOOK_PARTIAL'
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  test -f output-observed && break
+  sleep 0.05
+done
+test -f output-observed || exit 9
+printf ' stdout\n'
+printf 'HOOK_STDERR\n' >&2
+exit ${exitCode}
+`, { mode: 0o755 });
+  const output = { stdout: "", stderr: "" };
+  const result = commit(root, "fix: output", undefined, (chunk, stream) => {
+    output[stream] += chunk;
+    if (output.stderr.includes("HOOK_PARTIAL")) writeFileSync(join(root, "output-observed"), "observed");
+  });
+  if (exitCode === 0) await result;
+  else await expect(result).rejects.toThrow("HOOK_STDERR");
+  expect(output).toEqual({ stdout: "", stderr: "HOOK_PARTIAL stdout\nHOOK_STDERR\n" });
+});
+
 it("does not report hooks disabled by Git", async () => {
   const hooks = await configureHooks();
   await writeFile(join(hooks, "pre-commit"), "#!/bin/sh\nexit 8\n", { mode: 0o755 });
@@ -206,10 +233,11 @@ it("interrupts a hanging hook and its subprocesses using the configured deadline
   await stageAll(root);
 }, 2_000);
 
-it.skipIf(process.platform !== "darwin").each(["answer", "timeout", "failure", "silent-failure"])("supports real terminal hook logs and prompts: %s", async (mode) => {
+it.skipIf(process.platform !== "darwin").each(["answer", "timeout", "failure", "silent-failure", "captured"])("supports real terminal hook logs and prompts: %s", async (mode) => {
   const hooks = await configureHooks();
   await writeFile(join(hooks, "pre-commit"), `#!/bin/sh
-test -t 1 && test -t 2 || exit 7
+test ${mode === "captured" ? "! " : ""}-t 1 && test ${mode === "captured" ? "! " : ""}-t 2 || exit 7
+${mode === "captured" ? "printf 'HOOK_CAPTURED\\n'" : ""}
 stty -echo </dev/tty
 printf 'HOOK_LOG\nContinue? [y/n] ' >/dev/tty
 read answer </dev/tty
@@ -231,7 +259,7 @@ if (!(await getStagedDiff(${JSON.stringify(root)})).includes("change")) throw ne
 try {
   await commit(${JSON.stringify(root)}, "fix: interactive", ${JSON.stringify(mode)} === "failure" ? (event) => {
     if (event.phase === "exit" && event.exitCode !== 0) console.log("HOOK_FAILURE_STATUS");
-   } : undefined);
+   } : undefined, ${JSON.stringify(mode)} === "captured" ? (chunk) => console.log("CAPTURED_OUTPUT=" + chunk) : undefined);
   console.log("INTERACTIVE_DONE");
 } catch (error) {
   if (${JSON.stringify(mode)} === "timeout") {
@@ -255,7 +283,7 @@ try {
     output += data.toString();
     if (mode !== "timeout" && !answered && output.includes("Continue? [y/n]")) {
       answered = true;
-      terminal.process?.stdin?.write(mode === "answer" ? "y\n" : "n\n");
+      terminal.process?.stdin?.write(["answer", "captured"].includes(mode) ? "y\n" : "n\n");
     }
     if (output.includes("TERMINAL_DONE")) terminal.process?.stdin?.end();
   });
@@ -263,10 +291,11 @@ try {
   expect(result.stderr).toBe("");
   expect(result.exitCode, result.stdout).toBe(0);
   expect(result.stdout).toContain("HOOK_LOG");
-  expect(result.stdout).toContain(mode === "answer" ? "HOOK_ANSWER=y" : mode === "timeout" ? "TIMEOUT_OK" : "NATIVE_FAILURE_OK");
+  expect(result.stdout).toContain(["answer", "captured"].includes(mode) ? "HOOK_ANSWER=y" : mode === "timeout" ? "TIMEOUT_OK" : "NATIVE_FAILURE_OK");
+  if (mode === "captured") expect(result.stdout).toContain("CAPTURED_OUTPUT=HOOK_CAPTURED");
   if (mode === "failure") expect(result.stdout.match(/HOOK_DIAGNOSTIC/g)).toHaveLength(1);
   if (mode === "silent-failure") expect(result.stdout).not.toContain("HOOK_DIAGNOSTIC");
-  if (mode === "answer") {
+  if (["answer", "captured"].includes(mode)) {
     expect(result.stdout).toContain("INTERACTIVE_DONE");
     expect(result.stdout).not.toContain("fix: interactive");
     expect(result.stdout).not.toMatch(/\d+ files? changed/);
@@ -359,35 +388,6 @@ it("pushes HEAD to a new destination without changing local branches or their up
   expect(upstream.stdout.trim()).toBe("refs/remotes/origin/feature/input");
   await expect(exec("git", ["rev-parse", "--verify", "refs/heads/feature/destination"], { cwd: root })).rejects.toThrow();
   await expect(exec("git", ["rev-parse", "--verify", "feature/current"], { cwd: other })).rejects.toThrow();
-});
-
-it("detects unpushed commits against the requested remote branch, ignoring upstream names and stale refs", async () => {
-  await configureHooks();
-  await commit(root, "fix: initial");
-  const remote = join(root, "remote.git");
-  await exec("git", ["init", "--quiet", "--bare", remote]);
-  await git(["remote", "add", "origin", remote], root);
-  const branch = await currentBranch(root);
-  await expect(hasUnpushedCommits(root, "origin", branch)).resolves.toBe(true);
-  await push(root, "origin", branch);
-  await git(["symbolic-ref", "HEAD", `refs/heads/${branch}`], remote);
-  await expect(hasUnpushedCommits(root, "origin", branch)).resolves.toBe(false);
-  await expect(hasUnpushedCommits(root, "origin", "feature/new")).resolves.toBe(false);
-  await git(["checkout", "--quiet", "-b", "feature/local", "--track", `origin/${branch}`], root);
-  await writeFile(join(root, "file.txt"), "pending change");
-  await git(["add", "file.txt"], root);
-  await commit(root, "feat: pending");
-  await expect(hasUnpushedCommits(root, "origin", "feature/local")).resolves.toBe(true);
-  await push(root, "origin", branch);
-  await expect(hasUnpushedCommits(root, "origin", branch)).resolves.toBe(false);
-  await expect(hasUnpushedCommits(root, "origin", "feature/local")).resolves.toBe(false);
-  await git(["update-ref", "-d", `refs/heads/${branch}`], remote);
-  await expect(hasUnpushedCommits(root, "origin", branch)).resolves.toBe(true);
-});
-
-it("has no commits to push in an unborn repository", async () => {
-  await initRepo(root);
-  await expect(hasUnpushedCommits(root, "origin", "main")).resolves.toBe(false);
 });
 
 it.each(["", "--force", "invalid..branch", "main:other"])("rejects invalid push input before sending: %s", async (branch) => {

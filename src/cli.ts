@@ -4,7 +4,7 @@ import { defineCommand, runMain } from "citty";
 import pkg from "../package.json";
 import { commitCommand } from "./commands/commit";
 
-updateSettings({ withGuide: false });
+updateSettings({ withGuide: true });
 
 const main = defineCommand({
   meta: {

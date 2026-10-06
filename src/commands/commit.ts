@@ -24,7 +24,6 @@ import {
   getStagedDiff,
   getStagedDiffStats,
   git as runGit,
-  hasUnpushedCommits,
   push,
   stageAll,
   switchBranch,
@@ -34,7 +33,8 @@ import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import { COMMIT_TYPES } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
-import type { DiffStats, HookReporter } from "../types/git";
+import type { DiffStats } from "../types/git";
+import { runGitTask } from "./git-task";
 
 type Repository = { repo: string; label: string; pendingLabel: string };
 type CommitDraft = Repository & { message: string; stats: DiffStats };
@@ -116,11 +116,8 @@ export const commitCommand = defineCommand({
     if (args.pull) {
       for (const repo of repos) {
         const label = basename(repo);
-        try {
-          log.info(`${label}: pulling`);
-          await runGit(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, reportHooks(label));
-        } catch (error) {
-          reportGitFailure(`${label}: pull failed`, error);
+        if (!await runGitTask(label, "pull", `${label}: pulled`, (onHook, onOutput) =>
+          runGit(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, onHook, onOutput))) {
           process.exitCode = 1;
           return;
         }
@@ -199,10 +196,12 @@ export const commitCommand = defineCommand({
             draft.pendingLabel = styleText("bold", draft.label);
           }
         }
-        log.info(`${draft.label}: committing`);
-        await gitCommit(draft.repo, draft.message, reportHooks(draft.label));
+        if (!await runGitTask(draft.label, "commit", `${draft.label}: committed ${draft.message}`, (onHook, onOutput) =>
+          gitCommit(draft.repo, draft.message, onHook, onOutput))) {
+          process.exitCode = 1;
+          continue;
+        }
         toSend.push(draft);
-        log.success(`${draft.label}: committed ${draft.message}`);
       } catch (error) {
         reportGitFailure(`${draft.pendingLabel}: commit failed`, error);
         process.exitCode = 1;
@@ -241,17 +240,8 @@ export const commitCommand = defineCommand({
 
     if (shouldPush) {
       for (const { repo, label, branch, remote } of destinations) {
-        try {
-          log.info(`${label}: checking unpublished commits (${remote}/${branch}).`);
-          if (!await hasUnpushedCommits(repo, remote, branch, reportHooks(label))) {
-            log.info(`${label}: no unpushed commits. Skipping.`);
-            continue;
-          }
-          log.info(`${label}: pushing ${remote}/${branch}`);
-          await push(repo, remote, branch, reportHooks(label));
-          log.success(`${label}: pushed to ${remote}/${branch}`);
-        } catch (error) {
-          reportGitFailure(`${label}: push failed`, error);
+        if (!await runGitTask(label, "push", `${label}: pushed to ${remote}/${branch}`, (onHook, onOutput) =>
+          push(repo, remote, branch, onHook, onOutput))) {
           process.exitCode = 1;
           outro("Sending stopped after a Git failure.");
           return;
@@ -267,18 +257,6 @@ export const commitCommand = defineCommand({
 function reportGitFailure(message: string, error: unknown): void {
   if (error instanceof GitOutputError && error.hookFailureReported) return;
   log.error(error instanceof GitOutputError ? message : `${message}: ${errorMessage(error)}`);
-}
-
-function reportHooks(label: string): HookReporter {
-  return (event) => {
-    const hook = `${label}: ${event.name}`;
-    if (event.phase === "start") {
-      log.step(styleText("bold", hook));
-    } else {
-      if (event.exitCode === 0) log.success(`${hook}: completed`);
-      else log.error(`${hook}: failed (exit ${event.exitCode})`);
-    }
-  };
 }
 
 async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean): Promise<CommitDraft[] | null> {

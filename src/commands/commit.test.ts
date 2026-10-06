@@ -12,6 +12,7 @@ vi.mock("@clack/prompts", () => ({
   isCancel: (value: unknown) => typeof value === "symbol",
   log: { info: vi.fn(), step: vi.fn(), warn: vi.fn(), error: vi.fn(), message: vi.fn(), success: vi.fn() },
   spinner: vi.fn(),
+  taskLog: vi.fn(),
 }));
 
 import { confirm, log, select, spinner, text } from "@clack/prompts";
@@ -50,7 +51,6 @@ beforeEach(() => {
   vi.mocked(git.currentBranch).mockImplementation(async (repo) => branches.get(repo) ?? "main");
   vi.mocked(git.switchBranch).mockImplementation(async (repo, branch) => { branches.set(repo, branch); });
   vi.mocked(git.getPushRemote).mockResolvedValue("origin");
-  vi.mocked(git.hasUnpushedCommits).mockResolvedValue(true);
   vi.mocked(text).mockResolvedValue("");
   vi.mocked(git.getRepoStatus).mockResolvedValue({ branch: "main", hasChanges: true });
   vi.mocked(hasGitleaks).mockResolvedValue(true);
@@ -79,8 +79,8 @@ it("generates all messages concurrently before committing any repository", async
   expect(git.stageAll).toHaveBeenCalledTimes(2);
   expect(scanStagedChanges).toHaveBeenCalledWith("/repos/front");
   expect(scanStagedChanges).toHaveBeenCalledWith("/repos/back");
-  expect(git.commit).toHaveBeenCalledWith("/repos/front", "fix: front", expect.any(Function));
-  expect(git.commit).toHaveBeenCalledWith("/repos/back", "fix: back", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledWith("/repos/front", "fix: front", expect.any(Function), expect.any(Function));
+  expect(git.commit).toHaveBeenCalledWith("/repos/back", "fix: back", expect.any(Function), expect.any(Function));
   expect(select).not.toHaveBeenCalled();
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(git.push).not.toHaveBeenCalled();
@@ -94,7 +94,6 @@ it.each([false, true])("does not offer or attempt push when no repository has a 
 
   expect(git.commit).toHaveBeenCalledTimes(2);
   expect(confirm).not.toHaveBeenCalled();
-  expect(git.hasUnpushedCommits).not.toHaveBeenCalled();
   expect(git.push).not.toHaveBeenCalled();
   expect(process.exitCode).toBeUndefined();
 });
@@ -106,7 +105,7 @@ it("only offers repositories with a selectable remote in the push prompt", async
   await runCommand(commitCommand, { rawArgs: ["--yes"] });
 
   expect(confirm).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: "Push back (main)?" }));
-  expect(git.push).toHaveBeenCalledExactlyOnceWith(repos[1], "origin", "main", expect.any(Function));
+  expect(git.push).toHaveBeenCalledExactlyOnceWith(repos[1], "origin", "main", expect.any(Function), expect.any(Function));
 });
 
 it("pulls repositories sequentially before any preparation when --pull is present", async () => {
@@ -120,7 +119,7 @@ it("pulls repositories sequentially before any preparation when --pull is presen
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--pull"] });
 
-  expect(vi.mocked(git.git).mock.calls).toEqual(repos.map((repo) => [["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, expect.any(Function)]));
+  expect(vi.mocked(git.git).mock.calls).toEqual(repos.map((repo) => [["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, expect.any(Function), expect.any(Function)]));
   expect(vi.mocked(git.git).mock.invocationCallOrder[1]).toBeLessThan(vi.mocked(git.stageAll).mock.invocationCallOrder[0]!);
   expect(git.commit).toHaveBeenCalledTimes(2);
 });
@@ -130,7 +129,7 @@ it.each([new Error("Diverged history"), new GitOutputError("Native Git diagnosti
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--pull"] });
 
-  expect(git.git).toHaveBeenCalledExactlyOnceWith(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repos[0], expect.any(Function));
+  expect(git.git).toHaveBeenCalledExactlyOnceWith(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repos[0], expect.any(Function), expect.any(Function));
   expect(git.stageAll).not.toHaveBeenCalled();
   expect(generateCommitMessage).not.toHaveBeenCalled();
   expect(git.commit).not.toHaveBeenCalled();
@@ -139,30 +138,28 @@ it.each([new Error("Diverged history"), new GitOutputError("Native Git diagnosti
   expect(process.exitCode).toBe(1);
 });
 
-it.each([false, true])("honors --staged and only sends clean repositories with unpushed commits (pending=%s)", async (pending) => {
+it("honors --staged and pushes eligible repositories directly", async () => {
   vi.mocked(git.getStagedDiff).mockResolvedValueOnce("").mockResolvedValueOnce("back");
-  vi.mocked(git.hasUnpushedCommits).mockResolvedValueOnce(true).mockResolvedValueOnce(pending);
   await runCommand(commitCommand, { rawArgs: ["-syp"] });
 
   expect(git.stageAll).not.toHaveBeenCalled();
   expect(scanStagedChanges).toHaveBeenCalledExactlyOnceWith("/repos/back");
-  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function));
-  expect(git.push).toHaveBeenCalledWith("/repos/back", "origin", "main", expect.any(Function));
-  expect(git.push).toHaveBeenCalledTimes(pending ? 2 : 1);
-  expect(vi.mocked(git.push).mock.calls.map(([repo]) => repo)).toEqual(pending ? ["/repos/back", "/repos/front"] : ["/repos/back"]);
+  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function), expect.any(Function));
+  expect(git.push).toHaveBeenCalledWith("/repos/back", "origin", "main", expect.any(Function), expect.any(Function));
+  expect(git.push).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(git.push).mock.calls.map(([repo]) => repo)).toEqual(["/repos/back", "/repos/front"]);
   expect(confirm).not.toHaveBeenCalled();
 });
 
 it("sends existing commits without a new commit or LLM call", async () => {
   vi.mocked(git.getStagedDiff).mockResolvedValue("");
-  vi.mocked(git.hasUnpushedCommits).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
   vi.mocked(confirm).mockResolvedValue(true);
   await runCommand(commitCommand, { rawArgs: [] });
   expect(git.commit).not.toHaveBeenCalled();
   expect(generateCommitMessage).not.toHaveBeenCalled();
   expect(select).not.toHaveBeenCalled();
   expect(text).not.toHaveBeenCalled();
-  expect(git.push).toHaveBeenCalledTimes(1);
+  expect(git.push).toHaveBeenCalledTimes(2);
   expect(process.exitCode).toBeUndefined();
 });
 
@@ -172,7 +169,6 @@ it.each(["main", "master", "principal", "dev", "development"])("chooses the loca
   vi.mocked(text).mockImplementation(async () => {
     expect(git.commit).not.toHaveBeenCalled();
     expect(select).toHaveBeenCalledTimes(1);
-    expect(git.hasUnpushedCommits).not.toHaveBeenCalled();
     return "  feature/local  ";
   });
   vi.mocked(select).mockResolvedValue("all");
@@ -283,7 +279,7 @@ it("never sends a failed secret scan to the LLM and still processes the other re
 
   expect(generateCommitMessage).toHaveBeenCalledTimes(1);
   expect(generateCommitMessage).toHaveBeenCalledWith("/repos/back", expect.any(Object), undefined);
-  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function), expect.any(Function));
   expect(process.exitCode).toBe(1);
 });
 
@@ -295,7 +291,7 @@ it("edits one repo, then commits only that repo with its edited message", async 
 
   await runCommand(commitCommand, { rawArgs: [] });
 
-  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: edited back", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: edited back", expect.any(Function), expect.any(Function));
   expect(log.message).toHaveBeenCalledWith("(+12 -3) back (main): fix: edited back");
   expect(select).toHaveBeenCalledWith(expect.objectContaining({
     options: expect.arrayContaining([
@@ -340,41 +336,31 @@ it("accepts all repos and asks once before pushing only the successful commits",
   expect(git.commit).toHaveBeenCalledTimes(2);
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ message: "Push back (main)?" }));
-  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "origin", "main", expect.any(Function));
+  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "origin", "main", expect.any(Function), expect.any(Function));
   expect(process.exitCode).toBe(1);
 });
 
-it("reports unchanged repositories without pushing", async () => {
-  vi.mocked(git.hasUnpushedCommits).mockResolvedValue(false);
-  vi.mocked(git.getStagedDiff).mockResolvedValue("");
-  vi.mocked(confirm).mockResolvedValue(true);
-  await runCommand(commitCommand, { rawArgs: [] });
-  expect(log.info).toHaveBeenCalledWith("front (main): no unpushed commits. Skipping.");
-  expect(text).not.toHaveBeenCalled();
-  expect(git.push).not.toHaveBeenCalled();
-});
-
-it("checks each actual current branch after committing, without reusing another repo's branch", async () => {
+it("pushes each actual current branch without querying remote history", async () => {
   vi.mocked(git.currentBranch).mockImplementation(async (repo) => repo === repos[0] ? "feature/front" : "fix/api");
-  vi.mocked(git.hasUnpushedCommits).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
-  expect(git.hasUnpushedCommits).toHaveBeenNthCalledWith(1, "/repos/front", "origin", "feature/front", expect.any(Function));
-  expect(git.hasUnpushedCommits).toHaveBeenNthCalledWith(2, "/repos/back", "origin", "fix/api", expect.any(Function));
+  expect(git.push).toHaveBeenNthCalledWith(1, "/repos/front", "origin", "feature/front", expect.any(Function), expect.any(Function));
+  expect(git.push).toHaveBeenNthCalledWith(2, "/repos/back", "origin", "fix/api", expect.any(Function), expect.any(Function));
+  expect(git.git).not.toHaveBeenCalled();
   expect(text).not.toHaveBeenCalled();
-  expect(git.push).toHaveBeenCalledTimes(1);
+  expect(git.push).toHaveBeenCalledTimes(2);
 });
 
-it("shows the check step after confirmation and before detection", async () => {
+it("pushes immediately after confirmation without a preliminary fetch", async () => {
   vi.mocked(git.findRepos).mockResolvedValue([repos[0]!]);
   vi.mocked(confirm).mockResolvedValue(true);
-  vi.mocked(git.hasUnpushedCommits).mockImplementation(async () => {
+  vi.mocked(git.push).mockImplementation(async () => {
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(log.info).toHaveBeenCalledWith("front (main): checking unpublished commits (origin/main).");
     expect(text).toHaveBeenCalledTimes(1);
-    return false;
   });
   await runCommand(commitCommand, { rawArgs: ["--yes"] });
-  expect(git.hasUnpushedCommits).toHaveBeenCalledTimes(1);
+  expect(git.push).toHaveBeenCalledTimes(1);
+  expect(git.git).not.toHaveBeenCalled();
+  expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining("checking unpublished"));
   expect(process.exitCode).toBeUndefined();
 });
 
@@ -407,8 +393,8 @@ it("creates the trimmed local branch before committing and pushes it to each res
     message: "front (main): branch to commit to",
     initialValue: "",
   }));
-  expect(git.push).toHaveBeenCalledWith("/repos/front", "upstream", "feature/front", expect.any(Function));
-  expect(git.push).toHaveBeenCalledWith("/repos/back", "server", "feature/back", expect.any(Function));
+  expect(git.push).toHaveBeenCalledWith("/repos/front", "upstream", "feature/front", expect.any(Function), expect.any(Function));
+  expect(git.push).toHaveBeenCalledWith("/repos/back", "server", "feature/back", expect.any(Function), expect.any(Function));
   expect(confirm).not.toHaveBeenCalled();
 });
 
@@ -420,7 +406,7 @@ it("warns and skips an unresolved remote, then sends the next repo's current bra
   expect(git.commit).toHaveBeenCalledTimes(2);
   expect(log.warn).toHaveBeenCalledWith("front (main): no remote or ambiguous remote choice. Skipping push; commit remains local.");
   expect(text).toHaveBeenCalledTimes(2);
-  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "server", "main", expect.any(Function));
+  expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "server", "main", expect.any(Function), expect.any(Function));
   expect(select).not.toHaveBeenCalled();
   expect(process.exitCode).toBeUndefined();
 });
@@ -450,7 +436,7 @@ it("stops before committing or sending when a branch input is cancelled", async 
 it("keeps earlier commits local when the next branch input is cancelled", async () => {
   vi.mocked(text).mockResolvedValueOnce("feature/front").mockResolvedValueOnce(Symbol("cancel"));
   await runCommand(commitCommand, { rawArgs: ["-yp"] });
-  expect(git.commit).toHaveBeenCalledExactlyOnceWith(repos[0], "fix: front", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledExactlyOnceWith(repos[0], "fix: front", expect.any(Function), expect.any(Function));
   expect(git.push).not.toHaveBeenCalled();
   expect(process.exitCode).toBeUndefined();
 });
@@ -459,8 +445,8 @@ it("does not commit or push a repository whose branch switch failed", async () =
   vi.mocked(text).mockResolvedValue("feature/shared");
   vi.mocked(git.switchBranch).mockRejectedValueOnce(new Error("Local changes would be overwritten"));
   await runCommand(commitCommand, { rawArgs: ["-yp"] });
-  expect(git.commit).toHaveBeenCalledExactlyOnceWith(repos[1], "fix: back", expect.any(Function));
-  expect(git.push).toHaveBeenCalledExactlyOnceWith(repos[1], "origin", "feature/shared", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledExactlyOnceWith(repos[1], "fix: back", expect.any(Function), expect.any(Function));
+  expect(git.push).toHaveBeenCalledExactlyOnceWith(repos[1], "origin", "feature/shared", expect.any(Function), expect.any(Function));
   expect(process.exitCode).toBe(1);
 });
 
@@ -521,7 +507,7 @@ it.each(["empty", "error"])("skips a repo whose generation returns %s", async (f
 
   await runCommand(commitCommand, { rawArgs: [] });
 
-  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function));
+  expect(git.commit).toHaveBeenCalledExactlyOnceWith("/repos/back", "fix: back", expect.any(Function), expect.any(Function));
   expect(select).not.toHaveBeenCalled();
   expect(git.push).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);

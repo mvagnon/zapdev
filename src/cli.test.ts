@@ -10,10 +10,10 @@ vi.mock("./commands/commit", () => ({ commitCommand: { args: {} } }));
 
 afterEach(() => { updateSettings({ withGuide: true }); });
 
-it("disables the Clack guide globally before running any command", async () => {
-  updateSettings({ withGuide: true });
+it("enables the Clack guide globally before running any command", async () => {
+  updateSettings({ withGuide: false });
   vi.mocked(runMain).mockImplementation(async () => {
-    expect(settings.withGuide).toBe(false);
+    expect(settings.withGuide).toBe(true);
   });
 
   await import("./cli");
