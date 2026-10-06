@@ -147,12 +147,11 @@ export async function getRepoStatus(repo: string): Promise<{ branch: string; has
   };
 }
 
-/** Resolve the upstream's named remote, or the only configured remote when no upstream exists. */
-export async function getPushRemote(repo: string, branch: string): Promise<string | null> {
+/** Resolve the branch's upstream remote only when it is a configured named remote. */
+export async function getUpstreamRemote(repo: string, branch: string): Promise<string | null> {
   const remotes = (await git(["remote"], repo)).trim().split("\n").filter(Boolean);
   const upstream = (await git(["for-each-ref", "--format=%(upstream:remotename)", `refs/heads/${branch}`], repo)).trim();
-  if (upstream) return remotes.includes(upstream) ? upstream : null;
-  return remotes.length === 1 ? remotes[0]! : null;
+  return remotes.includes(upstream) ? upstream : null;
 }
 
 /** Push committed repository history without force or changes to local branches and upstreams. */

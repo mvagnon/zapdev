@@ -19,7 +19,7 @@ import {
   commit as gitCommit,
   currentBranch,
   findRepos,
-  getPushRemote,
+  getUpstreamRemote,
   getRepoStatus,
   getStagedDiff,
   getStagedDiffStats,
@@ -116,6 +116,17 @@ export const commitCommand = defineCommand({
     if (args.pull) {
       for (const repo of repos) {
         const label = basename(repo);
+        try {
+          const branch = await currentBranch(repo);
+          if (!await getUpstreamRemote(repo, branch)) {
+            log.warn(`${label}: no configured upstream remote. Skipping pull.`);
+            continue;
+          }
+        } catch (error) {
+          reportGitFailure(`${label}: pull failed`, error);
+          process.exitCode = 1;
+          return;
+        }
         if (!await runGitTask(label, "pull", `${label}: pulled`, (onHook, onOutput) =>
           runGit(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, onHook, onOutput))) {
           process.exitCode = 1;
@@ -215,9 +226,9 @@ export const commitCommand = defineCommand({
     for (const { repo, label } of toSend) {
       try {
         const branch = await currentBranch(repo);
-        const remote = await getPushRemote(repo, branch);
+        const remote = await getUpstreamRemote(repo, branch);
         if (remote) destinations.push({ repo, label, branch, remote });
-        else log.warn(`${label}: no remote or ambiguous remote choice. Skipping push; commit remains local.`);
+        else log.warn(`${label}: no configured upstream remote. Skipping push; commit remains local.`);
       } catch (error) {
         reportGitFailure(`${label}: push failed`, error);
         process.exitCode = 1;

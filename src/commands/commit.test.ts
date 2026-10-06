@@ -50,7 +50,7 @@ beforeEach(() => {
   const branches = new Map(repos.map((repo) => [repo, "main"]));
   vi.mocked(git.currentBranch).mockImplementation(async (repo) => branches.get(repo) ?? "main");
   vi.mocked(git.switchBranch).mockImplementation(async (repo, branch) => { branches.set(repo, branch); });
-  vi.mocked(git.getPushRemote).mockResolvedValue("origin");
+  vi.mocked(git.getUpstreamRemote).mockResolvedValue("origin");
   vi.mocked(text).mockResolvedValue("");
   vi.mocked(git.getRepoStatus).mockResolvedValue({ branch: "main", hasChanges: true });
   vi.mocked(hasGitleaks).mockResolvedValue(true);
@@ -87,8 +87,8 @@ it("generates all messages concurrently before committing any repository", async
   expect(git.git).not.toHaveBeenCalled();
 }, 1_000);
 
-it.each([false, true])("does not offer or attempt push when no repository has a selectable remote (push=%s)", async (push) => {
-  vi.mocked(git.getPushRemote).mockResolvedValue(null);
+it.each([false, true])("does not offer or attempt push when no repository has an upstream remote (push=%s)", async (push) => {
+  vi.mocked(git.getUpstreamRemote).mockResolvedValue(null);
 
   await runCommand(commitCommand, { rawArgs: ["--yes", ...(push ? ["--push"] : [])] });
 
@@ -98,8 +98,8 @@ it.each([false, true])("does not offer or attempt push when no repository has a 
   expect(process.exitCode).toBeUndefined();
 });
 
-it("only offers repositories with a selectable remote in the push prompt", async () => {
-  vi.mocked(git.getPushRemote).mockResolvedValueOnce(null).mockResolvedValueOnce("origin");
+it("only offers repositories with an upstream remote in the push prompt", async () => {
+  vi.mocked(git.getUpstreamRemote).mockResolvedValueOnce(null).mockResolvedValueOnce("origin");
   vi.mocked(confirm).mockResolvedValue(true);
 
   await runCommand(commitCommand, { rawArgs: ["--yes"] });
@@ -122,6 +122,32 @@ it("pulls repositories sequentially before any preparation when --pull is presen
   expect(vi.mocked(git.git).mock.calls).toEqual(repos.map((repo) => [["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, expect.any(Function), expect.any(Function)]));
   expect(vi.mocked(git.git).mock.invocationCallOrder[1]).toBeLessThan(vi.mocked(git.stageAll).mock.invocationCallOrder[0]!);
   expect(git.commit).toHaveBeenCalledTimes(2);
+});
+
+it.each([false, true])("skips pull without an upstream remote and continues committing (all=%s)", async (all) => {
+  vi.mocked(git.getUpstreamRemote).mockImplementation(async (repo) => all || repo === repos[0] ? null : "origin");
+
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--pull"] });
+
+  expect(vi.mocked(git.git).mock.calls).toEqual(all ? [] : [
+    [["pull", "--ff-only", "--no-rebase", "--no-autostash"], repos[1], expect.any(Function), expect.any(Function)],
+  ]);
+  expect(git.getUpstreamRemote).toHaveBeenCalledWith(repos[0], "main");
+  expect(log.warn).toHaveBeenCalledWith("front: no configured upstream remote. Skipping pull.");
+  expect(git.commit).toHaveBeenCalledTimes(2);
+  expect(process.exitCode).toBeUndefined();
+});
+
+it("stops before staging when upstream remote lookup fails before pull", async () => {
+  vi.mocked(git.getUpstreamRemote).mockRejectedValueOnce(new Error("Cannot read upstream"));
+
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--pull"] });
+
+  expect(git.git).not.toHaveBeenCalled();
+  expect(git.stageAll).not.toHaveBeenCalled();
+  expect(git.commit).not.toHaveBeenCalled();
+  expect(log.error).toHaveBeenCalledExactlyOnceWith("front: pull failed: Cannot read upstream");
+  expect(process.exitCode).toBe(1);
 });
 
 it.each([new Error("Diverged history"), new GitOutputError("Native Git diagnostic")])("stops before staging any repository when pull fails: %s", async (error) => {
@@ -383,7 +409,7 @@ it.each(["cancel", Symbol("cancel")])("leaves every repo uncommitted on cancella
 });
 
 it("creates the trimmed local branch before committing and pushes it to each resolved remote", async () => {
-  vi.mocked(git.getPushRemote).mockResolvedValueOnce("upstream").mockResolvedValueOnce("server");
+  vi.mocked(git.getUpstreamRemote).mockResolvedValueOnce("upstream").mockResolvedValueOnce("server");
   vi.mocked(text).mockResolvedValueOnce("  feature/front  ").mockResolvedValueOnce("feature/back");
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
@@ -399,12 +425,12 @@ it("creates the trimmed local branch before committing and pushes it to each res
 });
 
 it("warns and skips an unresolved remote, then sends the next repo's current branch", async () => {
-  vi.mocked(git.getPushRemote).mockResolvedValueOnce(null).mockResolvedValueOnce("server");
+  vi.mocked(git.getUpstreamRemote).mockResolvedValueOnce(null).mockResolvedValueOnce("server");
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
 
   expect(git.commit).toHaveBeenCalledTimes(2);
-  expect(log.warn).toHaveBeenCalledWith("front (main): no remote or ambiguous remote choice. Skipping push; commit remains local.");
+  expect(log.warn).toHaveBeenCalledWith("front (main): no configured upstream remote. Skipping push; commit remains local.");
   expect(text).toHaveBeenCalledTimes(2);
   expect(git.push).toHaveBeenCalledExactlyOnceWith("/repos/back", "server", "main", expect.any(Function), expect.any(Function));
   expect(select).not.toHaveBeenCalled();

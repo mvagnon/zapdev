@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { x } from "tinyexec";
 
-import { commit, currentBranch, findRepos, getPushRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, push, stageAll, switchBranch } from "./git";
+import { commit, currentBranch, findRepos, getUpstreamRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, push, stageAll, switchBranch } from "./git";
 import type { HookEvent } from "../types/git";
 
 const exec = promisify(execFile);
@@ -395,14 +395,16 @@ it.each(["", "--force", "invalid..branch", "main:other"])("rejects invalid push 
   await expect(push(root, "origin", branch)).rejects.toThrow();
 });
 
-it.each([{ remotes: [] }, { remotes: ["server"] }, { remotes: ["origin", "server"] }])("resolves only an unambiguous remote without an upstream: $remotes", async ({ remotes }) => {
-  await initRepo(root);
+it.each([{ remotes: [] }, { remotes: ["server"] }, { remotes: ["origin", "server"] }])("returns no remote without an upstream: $remotes", async ({ remotes }) => {
+  await configureHooks();
+  await commit(root, "fix: initial");
+  const branch = await currentBranch(root);
   for (const remote of remotes) await exec("git", ["remote", "add", remote, join(root, `${remote}.git`)], { cwd: root });
 
-  await expect(getPushRemote(root, "feature/current")).resolves.toBe(remotes.length === 1 ? remotes[0] : null);
+  await expect(getUpstreamRemote(root, branch)).resolves.toBeNull();
 });
 
-it("prefers the current branch's upstream remote even when its tracking ref is missing", async () => {
+it("resolves the current branch's upstream remote even when its tracking ref is missing", async () => {
   await configureHooks();
   await commit(root, "fix: initial");
   await exec("git", ["checkout", "--quiet", "-b", "feature/current"], { cwd: root });
@@ -413,8 +415,11 @@ it("prefers the current branch's upstream remote even when its tracking ref is m
   await exec("git", ["config", "branch.feature/current.merge", "refs/heads/main"], { cwd: root });
   await exec("git", ["config", "branch.feature/current.pushRemote", "origin"], { cwd: root });
 
-  await expect(getPushRemote(root, "feature/current")).resolves.toBe("team/server");
+  await expect(getUpstreamRemote(root, "feature/current")).resolves.toBe("team/server");
 
   await exec("git", ["config", "branch.feature/current.remote", "."], { cwd: root });
-  await expect(getPushRemote(root, "feature/current")).resolves.toBeNull();
+  await expect(getUpstreamRemote(root, "feature/current")).resolves.toBeNull();
+
+  await exec("git", ["config", "branch.feature/current.remote", "missing"], { cwd: root });
+  await expect(getUpstreamRemote(root, "feature/current")).resolves.toBeNull();
 });
