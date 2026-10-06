@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.12.0](https://github.com/mvagnon/zapdev/compare/v1.11.0...v1.12.0) (2026-10-06)
+
+
+### Features
+
+* remove subtree initialization command from CLI ([6d69bcf](https://github.com/mvagnon/zapdev/commit/6d69bcfcf232ad5a3a7e3f9f323bffebec301f86))
+* **review:** track diff stats for parallelized commits ([e116106](https://github.com/mvagnon/zapdev/commit/e116106401087b32d649dc5a07d2e92e86c5a2be))
+* update tests to remove reportNativeOutput from commit calls ([baaa711](https://github.com/mvagnon/zapdev/commit/baaa7118a5787b6c69759e9d4332729cd58fc3e3))
+
 ## [1.11.0](https://github.com/mvagnon/zapdev/compare/v1.10.0...v1.11.0) (2026-10-06)
 
 
