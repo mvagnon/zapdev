@@ -1,6 +1,6 @@
 {
   "name": "zapdev",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Fast, performant and lightweight git chores and dev tools using your terminal and an OpenAI-compatible LLM endpoint.",
   "type": "module",
   "bin": {
