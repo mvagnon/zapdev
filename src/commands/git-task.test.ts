@@ -1,3 +1,4 @@
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("@clack/prompts", () => ({
@@ -53,6 +54,33 @@ it("does not create an empty block for a silent command", async () => {
   expect(loader.clear).toHaveBeenCalledTimes(1);
   expect(taskLog).not.toHaveBeenCalled();
   expect(log.success).toHaveBeenCalledExactlyOnceWith("repo: committed");
+});
+
+it("uses a shared task log group without a separate spinner or task log", async () => {
+  const group = { message: vi.fn(), success: vi.fn(), error: vi.fn() };
+  await expect(runGitTask("repo", "pull", "repo: pulled", async (onHook, onOutput) => {
+    onOutput("native output\n", "stdout");
+    onHook({ name: "post-merge", phase: "start" });
+    onHook({ name: "post-merge", phase: "exit", exitCode: 0 });
+  }, group)).resolves.toBe(true);
+  expect(group.message.mock.calls).toEqual([
+    ["native output\n", { raw: true }], ["repo: post-merge: running…"],
+  ]);
+  expect(group.success).toHaveBeenCalledExactlyOnceWith("repo: pulled", { showLog: true });
+  expect(spinner).not.toHaveBeenCalled();
+  expect(taskLog).not.toHaveBeenCalled();
+});
+
+it("retains a grouped failure diagnostic after the shared task log is finalized", async () => {
+  const prompts = await vi.importActual<typeof import("@clack/prompts")>("@clack/prompts");
+  const output = new PassThrough();
+  output.setEncoding("utf8");
+  const task = prompts.taskLog({ title: "Pulling repositories", output, retainLog: true });
+  await expect(runGitTask("repo", "pull", "repo: pulled", async () => {
+    throw new Error("Diverged history");
+  }, task.group("repo"))).resolves.toBe(false);
+  task.error("Pulling failed");
+  expect(output.read()).toContain("repo: pull failed: Diverged history");
 });
 
 it("retains failed output without repeating native diagnostics", async () => {

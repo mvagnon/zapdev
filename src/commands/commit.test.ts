@@ -15,7 +15,7 @@ vi.mock("@clack/prompts", () => ({
   taskLog: vi.fn(),
 }));
 
-import { confirm, log, select, spinner, text } from "@clack/prompts";
+import { confirm, log, select, spinner, taskLog, text } from "@clack/prompts";
 import * as git from "../lib/git";
 import { GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
@@ -33,6 +33,10 @@ beforeEach(() => {
   vi.mocked(spinner).mockImplementation(() => ({
     start: vi.fn(), stop: vi.fn(), error: vi.fn(), cancel: vi.fn(),
     message: vi.fn(), clear: vi.fn(), isCancelled: false,
+  }));
+  vi.mocked(taskLog).mockImplementation(() => ({
+    message: vi.fn(), success: vi.fn(), error: vi.fn(),
+    group: vi.fn(() => ({ message: vi.fn(), success: vi.fn(), error: vi.fn() })),
   }));
   vi.stubEnv("ZD_URL", "http://localhost:1234/v1/chat/completions");
   vi.stubEnv("ZD_MODEL", "test-model");
@@ -108,21 +112,42 @@ it("only offers repositories with an upstream remote in the push prompt", async 
   expect(git.push).toHaveBeenCalledExactlyOnceWith(repos[1], "origin", "main", expect.any(Function), expect.any(Function));
 });
 
-it("pulls changed repositories sequentially before staging or generation when --pull is present", async () => {
-  vi.mocked(git.git).mockImplementation(async () => {
+it("pulls concurrently, waits for every pull, then prepares and generates concurrently", async () => {
+  let completedPulls = 0;
+  const pulling: (() => void)[] = [];
+  const staging: (() => void)[] = [];
+  const generating: (() => void)[] = [];
+  vi.mocked(git.git).mockImplementation(() => new Promise((resolve) => {
     expect(git.stageAll).not.toHaveBeenCalled();
     expect(git.getStagedDiff).not.toHaveBeenCalled();
     expect(hasGitleaks).not.toHaveBeenCalled();
     expect(generateCommitMessage).not.toHaveBeenCalled();
-    return "";
-  });
+    pulling.push(() => { completedPulls++; resolve(""); });
+    if (pulling.length === repos.length) {
+      pulling[0]!();
+      setImmediate(pulling[1]!);
+    }
+  }));
+  vi.mocked(git.stageAll).mockImplementation(() => new Promise((resolve) => {
+    expect(completedPulls).toBe(repos.length);
+    expect(generateCommitMessage).not.toHaveBeenCalled();
+    staging.push(resolve);
+    if (staging.length === repos.length) staging.forEach((finish) => finish());
+  }));
+  vi.mocked(generateCommitMessage).mockImplementation((diff) => new Promise((resolve) => {
+    generating.push(() => resolve(`fix: ${basename(diff)}`));
+    if (generating.length === repos.length) generating.forEach((finish) => finish());
+  }));
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--pull"] });
 
   expect(vi.mocked(git.git).mock.calls).toEqual(repos.map((repo) => [["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, expect.any(Function), expect.any(Function)]));
   expect(vi.mocked(git.git).mock.invocationCallOrder[1]).toBeLessThan(vi.mocked(git.stageAll).mock.invocationCallOrder[0]!);
   expect(git.commit).toHaveBeenCalledTimes(2);
-});
+  const loader = vi.mocked(spinner).mock.results[0]!.value;
+  expect(loader.start).toHaveBeenNthCalledWith(1, "Pulling repositories in parallel");
+  expect(loader.start).toHaveBeenNthCalledWith(2, "Preparing repositories and generating commit messages in parallel");
+}, 1_000);
 
 it.each([[false, true], [true, true], [false, false], [true, false]])("only pulls commit candidates (staged=%s, changes=%s)", async (staged, changes) => {
   vi.mocked(git.getRepoStatus).mockImplementation(async (repo) => ({
@@ -155,31 +180,46 @@ it.each([false, true])("skips pull without an upstream remote and continues comm
   expect(process.exitCode).toBeUndefined();
 });
 
-it("stops before staging when upstream remote lookup fails before pull", async () => {
+it("finishes other pulls but never stages when an upstream remote lookup fails", async () => {
   vi.mocked(git.getUpstreamRemote).mockRejectedValueOnce(new Error("Cannot read upstream"));
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--pull"] });
 
-  expect(git.git).not.toHaveBeenCalled();
+  expect(git.git).toHaveBeenCalledExactlyOnceWith(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repos[1], expect.any(Function), expect.any(Function));
   expect(git.stageAll).not.toHaveBeenCalled();
   expect(git.commit).not.toHaveBeenCalled();
   expect(log.error).toHaveBeenCalledExactlyOnceWith("front: pull failed: Cannot read upstream");
   expect(process.exitCode).toBe(1);
 });
 
-it.each([new Error("Diverged history"), new GitOutputError("Native Git diagnostic")])("stops before staging any repository when pull fails: %s", async (error) => {
-  vi.mocked(git.git).mockRejectedValueOnce(error);
+it.each([new Error("Diverged history"), new GitOutputError("Native Git diagnostic")])("waits for every pull without staging any repository when one fails: %s", async (error) => {
+  const pulling: (() => void)[] = [];
+  let completedPulls = 0;
+  vi.mocked(git.git).mockImplementation((_args, repo) => new Promise((resolve, reject) => {
+    expect(git.stageAll).not.toHaveBeenCalled();
+    pulling.push(() => {
+      completedPulls++;
+      if (repo === repos[0]) reject(error);
+      else resolve("");
+    });
+    if (pulling.length === repos.length) {
+      pulling[0]!();
+      setImmediate(pulling[1]!);
+    }
+  }));
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--pull"] });
 
-  expect(git.git).toHaveBeenCalledExactlyOnceWith(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repos[0], expect.any(Function), expect.any(Function));
+  expect(completedPulls).toBe(repos.length);
   expect(git.stageAll).not.toHaveBeenCalled();
   expect(generateCommitMessage).not.toHaveBeenCalled();
   expect(git.commit).not.toHaveBeenCalled();
   expect(confirm).not.toHaveBeenCalled();
-  expect(log.error).toHaveBeenCalledExactlyOnceWith(error instanceof GitOutputError ? "front: pull failed" : "front: pull failed: Diverged history");
+  const block = vi.mocked(taskLog).mock.results[0]!.value;
+  const group = vi.mocked(block.group).mock.results[0]!.value;
+  expect(group.error).toHaveBeenCalledExactlyOnceWith(error instanceof GitOutputError ? "front: pull failed" : "front: pull failed: Diverged history");
   expect(process.exitCode).toBe(1);
-});
+}, 1_000);
 
 it.each([false, true])("honors --staged and only offers or pushes the newly committed repository (push=%s)", async (push) => {
   vi.mocked(git.getStagedDiff).mockResolvedValueOnce("").mockResolvedValueOnce("back");

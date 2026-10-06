@@ -10,10 +10,11 @@ export async function runGitTask(
   operation: "commit" | "pull" | "push",
   successMessage: string,
   run: (onHook: HookReporter, onOutput: GitOutputReporter) => Promise<unknown>,
+  group?: ReturnType<ReturnType<typeof taskLog>["group"]>,
 ): Promise<boolean> {
   const title = `${label}: ${operation}`;
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-  const loader = interactive ? spinner({ withGuide: false }) : undefined;
+  const loader = interactive && !group ? spinner({ withGuide: false }) : undefined;
   /** Animate without consuming terminal input intended for Git. */
   const startLoading = (): void => {
     if (!loader) return;
@@ -22,7 +23,7 @@ export async function runGitTask(
     process.stdin.setRawMode?.(wasRaw);
     process.stdin.pause();
   };
-  let task: ReturnType<typeof taskLog> | undefined;
+  let task: Pick<ReturnType<typeof taskLog>, "message" | "success" | "error"> | undefined = group;
   const onOutput: GitOutputReporter = (chunk, stream) => {
     if (!interactive) {
       process[stream].write(chunk);
@@ -54,6 +55,7 @@ export async function runGitTask(
   } catch (error) {
     loader?.clear();
     const message = `${label}: ${operation} failed${error instanceof GitOutputError ? "" : `: ${errorMessage(error)}`}`;
+    group?.message(message);
     if (task) task.error(message);
     else if (!(error instanceof GitOutputError && error.hookFailureReported)) log.error(message);
     return false;

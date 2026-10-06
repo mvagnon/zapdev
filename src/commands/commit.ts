@@ -11,6 +11,7 @@ import {
   outro,
   select,
   spinner,
+  taskLog,
   text,
 } from "@clack/prompts";
 
@@ -113,29 +114,38 @@ export const commitCommand = defineCommand({
       return;
     }
 
+    const loader = interactive ? spinner() : undefined;
     if (args.pull) {
-      for (const repo of repos) {
+      loader?.start("Pulling repositories in parallel");
+      let pullLog: ReturnType<typeof taskLog> | undefined;
+      const pulls = await Promise.allSettled(repos.map(async (repo) => {
         const label = basename(repo);
-        try {
-          const hasChanges = args.staged
-            ? Boolean((await getStagedDiff(repo)).trim())
-            : (await getRepoStatus(repo)).hasChanges;
-          if (!hasChanges) continue;
-          const branch = await currentBranch(repo);
-          if (!await getUpstreamRemote(repo, branch)) {
-            log.warn(`${label}: no configured upstream remote. Skipping pull.`);
-            continue;
-          }
-        } catch (error) {
-          reportGitFailure(`${label}: pull failed`, error);
-          process.exitCode = 1;
-          return;
+        const hasChanges = args.staged
+          ? Boolean((await getStagedDiff(repo)).trim())
+          : (await getRepoStatus(repo)).hasChanges;
+        if (!hasChanges) return true;
+        const branch = await currentBranch(repo);
+        if (!await getUpstreamRemote(repo, branch)) {
+          return `${label}: no configured upstream remote. Skipping pull.`;
         }
-        if (!await runGitTask(label, "pull", `${label}: pulled`, (onHook, onOutput) =>
-          runGit(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, onHook, onOutput))) {
-          process.exitCode = 1;
-          return;
+        if (interactive) {
+          loader?.clear();
+          pullLog ??= taskLog({ title: "Pulling repositories in parallel", limit: 10, retainLog: true });
         }
+        return runGitTask(label, "pull", `${label}: pulled`, (onHook, onOutput) =>
+          runGit(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, onHook, onOutput), pullLog?.group(label));
+      }));
+      loader?.clear();
+      const failed = pulls.some((result) => result.status === "rejected" || result.value === false);
+      if (failed) pullLog?.error("Pulling failed");
+      else pullLog?.success("Repositories pulled", { showLog: true });
+      for (const [index, result] of pulls.entries()) {
+        if (result.status === "rejected") reportGitFailure(`${basename(repos[index]!)}: pull failed`, result.reason);
+        else if (typeof result.value === "string") log.warn(result.value);
+      }
+      if (failed) {
+        process.exitCode = 1;
+        return;
       }
     }
 
@@ -149,7 +159,6 @@ export const commitCommand = defineCommand({
     }
     if (!scan) log.info("Gitleaks not found, skipping secret scan.");
 
-    const loader = interactive ? spinner() : undefined;
     loader?.start("Preparing repositories and generating commit messages in parallel");
     const repositories: Repository[] = repos.map((repo) => ({ repo, label: basename(repo), pendingLabel: basename(repo) }));
     const results = await Promise.allSettled(repositories.map(async (repository) => {
