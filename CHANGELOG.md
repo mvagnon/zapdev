@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/mvagnon/zapdev/compare/v2.2.0...v3.0.0) (2026-10-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* add --ask-for-branch to prompt on every branch
+
+### Features
+
+* add --ask-for-branch to prompt on every branch ([71f9181](https://github.com/mvagnon/zapdev/commit/71f9181c35a63db5d77a95b85a66413642396b5e))
+
 ## [2.2.0](https://github.com/mvagnon/zapdev/compare/v2.1.1...v2.2.0) (2026-10-06)
 
 
