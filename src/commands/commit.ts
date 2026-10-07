@@ -13,6 +13,7 @@ import {
   text,
 } from "@clack/prompts";
 
+import { PROTECTED_BRANCHES } from "../config/protected-branches";
 import { resolveConfig, resolveHookTimeout } from "../lib/config";
 import { validateCommitMessage } from "../lib/commit-message";
 import {
@@ -77,6 +78,11 @@ export const commitCommand = defineCommand({
     pull: {
       type: "boolean",
       description: "Pull fast-forward updates before staging or generating commit messages.",
+    },
+    "ask-for-branch": {
+      type: "boolean",
+      alias: "A",
+      description: "Ask for a local branch before every commit, even on nonprotected branches.",
     },
     staged: {
       type: "boolean",
@@ -184,8 +190,8 @@ export const commitCommand = defineCommand({
       for (const draft of selected) {
         let withGuide = true;
         const current = await currentBranch(draft.repo);
-        if (/^(main|master|principal|dev|development)$/.test(current)) {
-          if (!interactive) throw new Error("Committing on a protected branch requires a terminal to choose a branch. Changes remain staged.");
+        if (args["ask-for-branch"] || PROTECTED_BRANCHES.includes(current)) {
+          if (!interactive) throw new Error("Choosing a branch before committing requires a terminal. Changes remain staged.");
           const answer = await text({
             message: `${basename(draft.repo)} (${current}): branch to commit to`,
             initialValue: previousBranchInput,

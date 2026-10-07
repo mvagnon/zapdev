@@ -309,16 +309,37 @@ it.each(["feature/main", "main-fix", "fix/dev", "develop", "feature/current"])("
   expect(vi.mocked(git.push).mock.calls.map((args) => args[2])).toEqual([branch, branch]);
 });
 
-it("refuses protected-branch commits without a terminal", async () => {
+it.each([undefined, "--ask-for-branch", "-A"])("refuses commits requiring a branch prompt without a terminal (flag=%s)", async (flag) => {
   process.stdin.isTTY = false;
   process.stdout.isTTY = false;
+  if (flag) vi.mocked(git.currentBranch).mockResolvedValue("feature/current");
 
-  await runCommand(commitCommand, { rawArgs: ["-yp"] });
+  await runCommand(commitCommand, { rawArgs: ["-yp", ...(flag ? [flag] : [])] });
 
   expect(text).not.toHaveBeenCalled();
   expect(git.commit).not.toHaveBeenCalled();
   expect(git.push).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);
+});
+
+it.each(["--ask-for-branch", "-A"])("asks for a branch in every selected repository with %s, even with --yes and --push", async (flag) => {
+  const branches = new Map([[repos[0]!, "feature/front"], [repos[1]!, "fix/api"]]);
+  vi.mocked(git.currentBranch).mockImplementation(async (repo) => branches.get(repo)!);
+  vi.mocked(git.switchBranch).mockImplementation(async (repo, branch) => { branches.set(repo, branch); });
+  vi.mocked(text).mockResolvedValueOnce("  feature/shared  ")
+    .mockImplementationOnce(async ({ initialValue }) => initialValue!);
+
+  await runCommand(commitCommand, { rawArgs: ["-yp", flag] });
+
+  expect(text).toHaveBeenCalledTimes(2);
+  expect(text).toHaveBeenNthCalledWith(1, expect.objectContaining({ message: "front (feature/front): branch to commit to", initialValue: "" }));
+  expect(text).toHaveBeenNthCalledWith(2, expect.objectContaining({ message: "back (fix/api): branch to commit to", initialValue: "feature/shared" }));
+  for (const [index, repo] of repos.entries()) {
+    expect(git.switchBranch).toHaveBeenNthCalledWith(index + 1, repo, "feature/shared");
+    expect(vi.mocked(git.switchBranch).mock.invocationCallOrder[index]).toBeLessThan(vi.mocked(git.commit).mock.invocationCallOrder[index]!);
+    expect(git.push).toHaveBeenNthCalledWith(index + 1, repo, "origin", "feature/shared", undefined, expect.any(Function));
+  }
+  expect(process.exitCode).toBeUndefined();
 });
 
 it("uses the current branch for cleared input, retaining the previous input default", async () => {

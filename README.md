@@ -129,6 +129,7 @@ zapdev commit
 | `-p, --push`        | Skip push confirmation and push the current branch                               |
 | `--no-push`, `--push=false` | Keep commits local without push confirmation                            |
 | `--pull`           | Pull fast-forward updates only in repositories with changes to commit and an upstream remote |
+| `-A, --ask-for-branch` | Ask for a local branch before every commit, even on nonprotected branches      |
 | `-s, --staged`      | Commit only changes that are already staged                                      |
 | `-y, --yes`         | Skip commit review; still confirm push unless `--push` is set                    |
 
@@ -156,11 +157,11 @@ With `--pull`, only repositories with local changes are pulled, in parallel. Wit
 
 Each step uses one spinner: start, wait, stop. Normal Git and hook output is captured without live task logs; failure diagnostics are displayed once. Without a terminal, steps print plain progress messages instead. Git keeps terminal input, but interactive hooks must read and write through `/dev/tty`; prompts on captured stdout/stderr are not displayed. Each hook retains a 60-second deadline; override it with `ZD_HOOK_TIMEOUT=120 zapdev commit`. `--yes` skips commit review, not native prompts.
 
-Immediately before each selected commit, zapdev asks for a local branch only when the current name exactly matches `main`, `master`, `principal`, `dev`, or `development`, including with `--yes`. The first prompt starts empty; subsequent prompts reuse the previous input across repositories. Press Enter to accept the prefilled name; an empty or cleared input keeps the current branch and leaves the next prompt empty. A different name switches to the existing local branch or creates it from HEAD, without forcing or discarding pending changes. Other branches and repositories with nothing to commit never trigger this prompt. Cancelling stops the remaining commits and all pushes; earlier commits remain local.
+Immediately before each selected commit, zapdev asks for a local branch only when the current name exactly matches `main`, `master`, `principal`, `dev`, or `development`, including with `--yes`. With `--ask-for-branch` (`-A`), it asks on every branch instead. The first prompt starts empty; subsequent prompts reuse the previous input across repositories. Press Enter to accept the prefilled name; an empty or cleared input keeps the current branch and leaves the next prompt empty. A different name switches to the existing local branch or creates it from HEAD, without forcing or discarding pending changes. Repositories with nothing to commit never trigger this prompt. Cancelling stops the remaining commits and all pushes; earlier commits remain local.
 
 Pushes always target a remote branch with the current local branch's name, with no destination input. The remote is the branch's configured upstream remote, otherwise `origin`, otherwise the only configured remote. With no remote or multiple remotes and no `origin`, push is skipped with a warning. The first successful push sets the upstream when none exists; existing upstreams are preserved. Pushes run directly, without a preliminary fetch or history comparison; Git handles up-to-date branches and rejects non-fast-forward updates. No rebase, merge, retry, or force-push.
 
-Without a TTY, zapdev commits prepared repositories on nonprotected branches automatically; protected-branch commits are refused and changes remain staged. `--push` can publish without a TTY; without it, commits stay local. Repositories without new changes do not trigger an LLM call, branch prompt, or new commit.
+Without a TTY, zapdev commits prepared repositories on nonprotected branches automatically; commits requiring a branch prompt (protected branches or `--ask-for-branch`) are refused and changes remain staged. `--push` can publish without a TTY; without it, commits stay local. Repositories without new changes do not trigger an LLM call, branch prompt, or new commit.
 
 ### Zed IDE
 
