@@ -9,6 +9,7 @@ import { x } from "tinyexec";
 import { resolveHookTimeout } from "./config";
 import { GitOutputError } from "./errors";
 import { createHookReporter } from "./git-hooks";
+import { reportProcessOutput } from "./process-output";
 import type { DiffStats, GitOutputReporter, HookReporter } from "../types/git";
 
 /** Run Git directly, preserving terminal output and enforcing native hook deadlines. */
@@ -27,11 +28,7 @@ export async function git(args: string[], cwd: string, onHook?: HookReporter, on
       stdio: interactive ? ["inherit", onOutput ? "pipe" : "inherit", onOutput ? "pipe" : "inherit", "pipe"] : ["pipe", "pipe", "pipe", "pipe"],
     },
   });
-  if (onOutput) {
-    for (const stream of ["stdout", "stderr"] as const) {
-      child.process?.[stream]?.setEncoding("utf8").on("data", (chunk: string) => onOutput(chunk, stream));
-    }
-  }
+  reportProcessOutput(child.process, onOutput);
   let timeoutError: Error | undefined;
   let hookFailureReported = false;
   const { report, close } = createHookReporter((event) => {
@@ -98,8 +95,8 @@ export async function tryGit(args: string[], cwd: string): Promise<string | null
 }
 
 /** Stage all changes in the given repository. */
-export async function stageAll(repo: string): Promise<void> {
-  await git(["add", "-A"], repo);
+export async function stageAll(repo: string, onOutput?: GitOutputReporter, onHook?: HookReporter): Promise<void> {
+  await git(["add", "-A"], repo, onHook, onOutput);
 }
 
 /** Read staged file counts and patches together, preserving repository-relative paths and renames. */
@@ -134,11 +131,11 @@ export async function currentBranch(repo: string): Promise<string> {
 }
 
 /** Switch to an existing local branch or create it from HEAD, preserving pending changes without force. */
-export async function switchBranch(repo: string, branch: string): Promise<void> {
+export async function switchBranch(repo: string, branch: string, onHook?: HookReporter, onOutput?: GitOutputReporter): Promise<void> {
   await git(["check-ref-format", "--branch", branch], repo);
   await git(["check-ref-format", `refs/heads/${branch}`], repo);
   const exists = await tryGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], repo) !== null;
-  await git(exists ? ["switch", "--no-guess", "--", branch] : ["switch", "--no-track", "-c", branch], repo);
+  await git(exists ? ["switch", "--no-guess", "--", branch] : ["switch", "--no-track", "-c", branch], repo, onHook, onOutput);
 }
 
 /** Read the display branch and pending changes, including untracked files. */

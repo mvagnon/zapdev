@@ -123,7 +123,7 @@ export const commitCommand = defineCommand({
       }
 
       if (args.pull) {
-        const pulls = await runTask("Pulling repositories in parallel", "Repositories pulled", async (onOutput) => {
+        const pulls = await runTask("Pulling repositories in parallel", "Repositories pulled", async (onOutput, onHook) => {
           const results = await Promise.allSettled(repos.map(async (repo) => {
             const label = basename(repo);
             const hasChanges = args.staged
@@ -134,7 +134,7 @@ export const commitCommand = defineCommand({
             if (!await getUpstreamRemote(repo, branch)) {
               return `${label}: no configured upstream remote. Skipping pull.`;
             }
-            await runGit(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, undefined, onOutput);
+            await runGit(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, onHook, onOutput);
             return null;
           }));
           for (const [index, result] of results.entries()) {
@@ -148,18 +148,18 @@ export const commitCommand = defineCommand({
       }
 
       const repositories: Repository[] = repos.map((repo) => ({ repo, label: basename(repo), pendingLabel: basename(repo) }));
-      const { results, scan } = await runTask("Preparing repositories and generating commit messages in parallel", "Repositories prepared", async () => {
+      const { results, scan } = await runTask("Preparing repositories and generating commit messages in parallel", "Repositories prepared", async (onOutput, onHook) => {
         const scan = await hasGitleaks();
         const results = await Promise.allSettled(repositories.map(async (repository) => {
           const { repo } = repository;
           const { branch, hasChanges } = await getRepoStatus(repo);
           repository.label = `${basename(repo)} (${branch})`;
           repository.pendingLabel = hasChanges ? styleText("bold", repository.label) : repository.label;
-          if (!args.staged) await stageAll(repo);
+          if (!args.staged) await stageAll(repo, onOutput, onHook);
           const diff = await getStagedDiff(repo);
           if (!diff.trim()) return null;
           const stats = await getStagedDiffStats(repo);
-          if (scan) await scanStagedChanges(repo);
+          if (scan) await scanStagedChanges(repo, onOutput);
           const message = await generateCommitMessage(diff, config, args.type);
           if (!message) throw new Error("The model returned an empty message.");
           return { ...repository, message, stats };
@@ -189,6 +189,7 @@ export const commitCommand = defineCommand({
       let previousBranchInput = "";
       for (const draft of selected) {
         let withGuide = true;
+        let targetBranch: string | undefined;
         const current = await currentBranch(draft.repo);
         if (args["ask-for-branch"] || PROTECTED_BRANCHES.includes(current)) {
           if (!interactive) throw new Error("Choosing a branch before committing requires a terminal. Changes remain staged.");
@@ -204,13 +205,15 @@ export const commitCommand = defineCommand({
           withGuide = Boolean(previousBranchInput);
           const branch = previousBranchInput || current;
           if (branch !== current) {
-            await switchBranch(draft.repo, branch);
+            targetBranch = branch;
             draft.label = `${basename(draft.repo)} (${branch})`;
             draft.pendingLabel = styleText("bold", draft.label);
           }
         }
-        await runTask(`${draft.label}: commit`, `${draft.label}: committed ${draft.message}`, (onOutput) =>
-          gitCommit(draft.repo, draft.message, undefined, onOutput), withGuide);
+        await runTask(`${draft.label}: commit`, `${draft.label}: committed ${draft.message}`, async (onOutput, onHook) => {
+          if (targetBranch) await switchBranch(draft.repo, targetBranch, onHook, onOutput);
+          await gitCommit(draft.repo, draft.message, onHook, onOutput);
+        }, withGuide);
         toSend.push(draft);
       }
       if (toSend.length === 0) return;
@@ -238,9 +241,9 @@ export const commitCommand = defineCommand({
       }
 
       if (shouldPush && destinations.length) {
-        await runTask("Pushing repositories in parallel", "Repositories pushed", async (onOutput) => {
+        await runTask("Pushing repositories in parallel", "Repositories pushed", async (onOutput, onHook) => {
           const results = await Promise.allSettled(destinations.map(({ repo, branch, remote }) =>
-            push(repo, remote, branch, undefined, onOutput)));
+            push(repo, remote, branch, onHook, onOutput)));
           for (const [index, result] of results.entries()) {
             if (result.status === "rejected") throw new Error(`${destinations[index]!.label}: ${errorMessage(result.reason)}`);
           }

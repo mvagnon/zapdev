@@ -1,5 +1,8 @@
 import { x } from "tinyexec";
 
+import { reportProcessOutput } from "./process-output";
+import type { GitOutputReporter } from "../types/git";
+
 export async function hasGitleaks(): Promise<boolean> {
   try {
     await x("gitleaks", ["version"], { nodePath: false });
@@ -13,11 +16,13 @@ export async function hasGitleaks(): Promise<boolean> {
 }
 
 /** Scan the given repository's staged changes before sending them to the LLM. */
-export async function scanStagedChanges(repo: string): Promise<void> {
-  const result = await x("gitleaks", ["git", "--staged", "--verbose"], {
+export async function scanStagedChanges(repo: string, onOutput?: GitOutputReporter): Promise<void> {
+  const child = x("gitleaks", ["git", "--staged", "--verbose"], {
     nodePath: false,
     nodeOptions: { cwd: repo },
   });
+  reportProcessOutput(child.process, onOutput);
+  const result = await child;
   if (result.exitCode === 0) return;
 
   const output = result.stderr.trim() || result.stdout.trim();
