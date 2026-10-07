@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.2](https://github.com/mvagnon/zapdev/compare/v3.0.1...v3.0.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **git-task:** defer output until spinner completion ([5e26fae](https://github.com/mvagnon/zapdev/commit/5e26fae2180f882492620546c0512b31fb18ade6))
+
 ## [3.0.1](https://github.com/mvagnon/zapdev/compare/v3.0.0...v3.0.1) (2026-10-07)
 
 
