@@ -3,7 +3,7 @@ import { log, spinner, taskLog } from "@clack/prompts";
 import { errorMessage } from "../lib/errors";
 import type { GitOutputReporter, HookReporter } from "../types/git";
 
-/** Run a CLI step, replacing its spinner with retained native output when commands or hooks emit logs. */
+/** Run a CLI step, deferring output until completion unless hooks need live terminal access. */
 export async function runTask<T>(
   title: string,
   successMessage: string,
@@ -14,12 +14,15 @@ export async function runTask<T>(
   const loader = interactive ? spinner({ withGuide }) : undefined;
   const wasRaw = Boolean(process.stdin.isRaw);
   let outputLog: ReturnType<typeof taskLog> | undefined;
+  const pendingOutput: string[] = [];
   let hooksAnnounced = false;
   let stderr = "";
   const getLog = (): ReturnType<typeof taskLog> => {
     if (!outputLog) {
       loader?.clear();
       outputLog = taskLog({ title, spacing: 0, retainLog: true });
+      for (const chunk of pendingOutput) outputLog.message(chunk, { raw: true });
+      pendingOutput.length = 0;
     }
     return outputLog;
   };
@@ -32,17 +35,20 @@ export async function runTask<T>(
     const result = await run((chunk, stream) => {
       if (!chunk) return;
       if (stream === "stderr") stderr += chunk;
-      getLog().message(chunk, { raw: true });
+      if (outputLog) outputLog.message(chunk, { raw: true });
+      else pendingOutput.push(chunk);
     }, (event) => {
       if (event.phase !== "start" || hooksAnnounced) return;
       hooksAnnounced = true;
       getLog().message("Running hooks");
     });
+    if (pendingOutput.length) getLog();
     if (outputLog) outputLog.success(successMessage, { showLog: true });
     else if (loader) loader.stop(successMessage);
     else log.success(successMessage, { spacing: 0 });
     return result;
   } catch (error) {
+    if (pendingOutput.length) getLog();
     if (outputLog) outputLog.error(`${title} failed`);
     else loader?.clear();
     const message = errorMessage(error);

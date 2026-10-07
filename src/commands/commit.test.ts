@@ -168,7 +168,7 @@ it("pulls concurrently, waits for every pull, then prepares and generates concur
 
   await runCommand(commitCommand, { rawArgs: ["--yes", "--pull"] });
 
-  expect(spinnerStates).toEqual([true, false, false, false, false]);
+  expect(spinnerStates).toEqual([true, true, true, true, true]);
   expect(vi.mocked(git.git).mock.calls).toEqual(repos.map((repo) => [["pull", "--ff-only", "--no-rebase", "--no-autostash"], repo, expect.any(Function), expect.any(Function)]));
   expect(vi.mocked(git.git).mock.invocationCallOrder[1]).toBeLessThan(vi.mocked(git.stageAll).mock.invocationCallOrder[0]!);
   expect(git.commit).toHaveBeenCalledTimes(2);
@@ -743,6 +743,14 @@ it("routes staging, secret-scan and branch-switch diagnostics without displaying
   vi.mocked(text).mockResolvedValue("feature/logs");
   vi.mocked(git.stageAll).mockImplementation(async (_repo, onOutput) => onOutput!("stage warning\n", "stderr"));
   vi.mocked(scanStagedChanges).mockImplementation(async (_repo, onOutput) => onOutput!("scan output\n", "stdout"));
+  vi.mocked(generateCommitMessage).mockImplementation(async () => {
+    const loader = vi.mocked(spinner).mock.results[0]!.value;
+    expect(loader.start).toHaveBeenCalledTimes(1);
+    expect(loader.clear).not.toHaveBeenCalled();
+    expect(loader.stop).not.toHaveBeenCalled();
+    expect(taskLog).not.toHaveBeenCalled();
+    return "fix: front";
+  });
   vi.mocked(git.switchBranch).mockImplementation(async (_repo, _branch, onHook, onOutput) => {
     onHook!({ name: "post-checkout", phase: "start" });
     onOutput!("branch output\n", "stderr");

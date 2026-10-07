@@ -29,7 +29,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it.each([true, false])("renders native output in a task log without overlapping the spinner (TTY=%s)", async (interactive) => {
+it.each([true, false])("defers native output until completion without interrupting the spinner (TTY=%s)", async (interactive) => {
   process.stdout.isTTY = interactive;
   const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
   const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
@@ -38,7 +38,9 @@ it.each([true, false])("renders native output in a task log without overlapping 
     onOutput("stderr", "stderr");
     expect(loader.start).toHaveBeenCalledTimes(interactive ? 1 : 0);
     expect(loader.stop).not.toHaveBeenCalled();
-    expect(loader.clear).toHaveBeenCalledTimes(interactive ? 1 : 0);
+    expect(loader.clear).not.toHaveBeenCalled();
+    expect(taskLog).not.toHaveBeenCalled();
+    expect(outputLog.message).not.toHaveBeenCalled();
     return 42;
   })).resolves.toBe(42);
   expect(stdout).not.toHaveBeenCalled();
@@ -50,6 +52,8 @@ it.each([true, false])("renders native output in a task log without overlapping 
     expect(spinner).toHaveBeenCalledExactlyOnceWith({ withGuide: true });
     expect(loader.start).toHaveBeenCalledExactlyOnceWith("repo: pull");
     expect(loader.stop).not.toHaveBeenCalled();
+    expect(loader.clear).toHaveBeenCalledTimes(1);
+    expect(loader.clear.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(taskLog).mock.invocationCallOrder[0]!);
   } else {
     expect(spinner).not.toHaveBeenCalled();
     expect(log.info).toHaveBeenCalledExactlyOnceWith("repo: pull");
@@ -76,14 +80,18 @@ it.each([true, false])("retains failure output in the task log (TTY=%s)", async 
 
 it("announces sequential hooks once in the same task log, including silent hooks", async () => {
   await runTask("repo: commit", "repo: committed", async (onOutput, onHook) => {
+    onOutput("branch warning\n", "stderr");
+    expect(taskLog).not.toHaveBeenCalled();
     onHook({ name: "pre-commit", phase: "start" });
+    expect(loader.clear).toHaveBeenCalledTimes(1);
     onOutput("hook output\n", "stderr");
+    expect(outputLog.message).toHaveBeenLastCalledWith("hook output\n", { raw: true });
     onHook({ name: "pre-commit", phase: "exit", exitCode: 0 });
     onHook({ name: "commit-msg", phase: "start" });
     onHook({ name: "commit-msg", phase: "exit", exitCode: 0 });
   });
   expect(taskLog).toHaveBeenCalledTimes(1);
-  expect(outputLog.message.mock.calls).toEqual([["Running hooks"], ["hook output\n", { raw: true }]]);
+  expect(outputLog.message.mock.calls).toEqual([["branch warning\n", { raw: true }], ["Running hooks"], ["hook output\n", { raw: true }]]);
   expect(loader.clear).toHaveBeenCalledTimes(1);
   expect(outputLog.success).toHaveBeenCalledWith("repo: committed", { showLog: true });
 });
