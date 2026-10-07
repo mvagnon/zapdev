@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/mvagnon/zapdev/compare/v3.0.0...v3.0.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **pipeline:** Enhance command execution with hooks and output logging ([dfac7dc](https://github.com/mvagnon/zapdev/commit/dfac7dcbb5e3e4fe0bb2c098b2a525f374205442))
+
 ## [3.0.0](https://github.com/mvagnon/zapdev/compare/v2.2.0...v3.0.0) (2026-10-07)
 
 
