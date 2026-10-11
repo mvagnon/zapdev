@@ -315,7 +315,7 @@ it.each(["feature/main", "main-fix", "fix/dev", "develop", "feature/current"])("
   expect(vi.mocked(git.push).mock.calls.map((args) => args[2])).toEqual([branch, branch]);
 });
 
-it.each([undefined, "--ask-for-branch", "-A"])("refuses commits requiring a branch prompt without a terminal (flag=%s)", async (flag) => {
+it.each([undefined, "--ask-for-branch", "-A", "-yA"])("refuses commits requiring a branch prompt without a terminal (flag=%s)", async (flag) => {
   process.stdin.isTTY = false;
   process.stdout.isTTY = false;
   if (flag) vi.mocked(git.currentBranch).mockResolvedValue("feature/current");
@@ -328,7 +328,7 @@ it.each([undefined, "--ask-for-branch", "-A"])("refuses commits requiring a bran
   expect(process.exitCode).toBe(1);
 });
 
-it.each(["--ask-for-branch", "-A"])("asks for a branch in every selected repository with %s and --push", async (flag) => {
+it.each(["--ask-for-branch", "-A", "-yA"])("asks for a branch in every selected repository with %s and --push", async (flag) => {
   const branches = new Map([[repos[0]!, "feature/front"], [repos[1]!, "fix/api"]]);
   vi.mocked(git.currentBranch).mockImplementation(async (repo) => branches.get(repo)!);
   vi.mocked(git.switchBranch).mockImplementation(async (repo, branch) => { branches.set(repo, branch); });
@@ -337,6 +337,8 @@ it.each(["--ask-for-branch", "-A"])("asks for a branch in every selected reposit
 
   await runCommand(commitCommand, { rawArgs: ["-p", flag] });
 
+  expect(select).toHaveBeenCalledTimes(flag === "-yA" ? 0 : 1);
+  expect(confirm).not.toHaveBeenCalled();
   expect(text).toHaveBeenCalledTimes(2);
   expect(text).toHaveBeenNthCalledWith(1, expect.objectContaining({ message: "front (feature/front): branch to commit to", initialValue: "" }));
   expect(text).toHaveBeenNthCalledWith(2, expect.objectContaining({ message: "back (fix/api): branch to commit to", initialValue: "feature/shared" }));
@@ -384,7 +386,7 @@ it("keeps empty inputs empty and sends to each repository's current branch, incl
 it.each([false, true])("skips every prompt with --yes, retaining protected branches and committing locally (TTY=%s)", async (interactive) => {
   process.stdin.isTTY = interactive;
   process.stdout.isTTY = interactive;
-  await runCommand(commitCommand, { rawArgs: ["-yTA"] });
+  await runCommand(commitCommand, { rawArgs: ["-y"] });
   expect(git.commit).toHaveBeenCalledTimes(2);
   expect(generateCommitMessage).toHaveBeenCalledWith(repos[0], expect.any(Object), undefined);
   expect(select).not.toHaveBeenCalled();
@@ -796,7 +798,7 @@ it("rejects an invalid hook timeout before preparing repositories", async () => 
 });
 
 it.each(["feat", "deps", "feat!", "fix!", "refactor!", "deps!"])("passes the explicit type %s to message generation", async (type) => {
-  await runCommand(commitCommand, { rawArgs: ["--yes", "-T", "-A", "--type", type] });
+  await runCommand(commitCommand, { rawArgs: ["--yes", "--type", type] });
   expect(generateCommitMessage).toHaveBeenCalledWith("/repos/front", expect.any(Object), type);
   expect(select).not.toHaveBeenCalled();
   expect(text).not.toHaveBeenCalled();
@@ -804,7 +806,7 @@ it.each(["feat", "deps", "feat!", "fix!", "refactor!", "deps!"])("passes the exp
   expect(git.commit).toHaveBeenCalledTimes(2);
 });
 
-it.each([["--ask-for-type", false], ["-T", true]] as const)("uses the chosen type for every generation with %s (breaking=%s)", async (flag, breaking) => {
+it.each([["--ask-for-type", false], ["-T", true], ["-yT", false], ["-yTA", true]] as const)("uses the chosen type for every generation with %s (breaking=%s)", async (flag, breaking) => {
   vi.mocked(select).mockResolvedValueOnce("feat");
   vi.mocked(confirm).mockResolvedValue(breaking);
   vi.mocked(generateCommitMessage).mockImplementation(async (diff, _config, type) => {
@@ -817,15 +819,45 @@ it.each([["--ask-for-type", false], ["-T", true]] as const)("uses the chosen typ
 
   expect(generateCommitMessage).toHaveBeenCalledTimes(repos.length);
   expect(git.commit).toHaveBeenCalledTimes(repos.length);
+  expect(select).toHaveBeenCalledTimes(flag.startsWith("-y") ? 1 : 2);
+  expect(text).toHaveBeenCalledTimes(flag === "-yT" ? 0 : repos.length);
+  expect(git.push).not.toHaveBeenCalled();
   expect(process.exitCode).toBeUndefined();
 });
 
-it.each(["type", "breaking", "terminal"])("stops before generation when choosing the type fails at %s", async (step) => {
+it.each([true, false])("honors every explicit flag with --yes regardless of its position (yesFirst=%s)", async (yesFirst) => {
+  const config = { url: "https://example.com/v1/chat/completions", model: "explicit-model", effort: "high" };
+  const flags = [
+    "--url", config.url, "--model", config.model, "--effort", config.effort,
+    "--type", "fix!", "--ask-for-type", "--ask-for-branch", "--staged", "--pull", "--push",
+  ];
+  vi.mocked(select).mockResolvedValueOnce("feat");
+  vi.mocked(confirm).mockResolvedValue(true);
+  vi.mocked(text).mockResolvedValue("feature/explicit");
+
+  await runCommand(commitCommand, { rawArgs: yesFirst ? ["--yes", ...flags] : [...flags, "--yes"] });
+
+  expect(git.git).toHaveBeenCalledTimes(repos.length);
+  expect(git.git).toHaveBeenCalledWith(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repos[0], expect.any(Function), expect.any(Function));
+  expect(git.stageAll).not.toHaveBeenCalled();
+  expect(select).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: "Commit type", initialValue: "fix" }));
+  expect(confirm).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: "Breaking change?" }));
+  expect(text).toHaveBeenCalledTimes(repos.length);
+  expect(generateCommitMessage).toHaveBeenCalledWith(repos[0], config, "feat!");
+  expect(git.switchBranch).toHaveBeenCalledTimes(repos.length);
+  expect(git.switchBranch).toHaveBeenCalledWith(repos[0], "feature/explicit", expect.any(Function), expect.any(Function));
+  expect(git.commit).toHaveBeenCalledTimes(repos.length);
+  expect(git.push).toHaveBeenCalledTimes(repos.length);
+  expect(git.push).toHaveBeenCalledWith(repos[0], "origin", "feature/explicit", expect.any(Function), expect.any(Function));
+  expect(process.exitCode).toBeUndefined();
+});
+
+it.each(["type", "breaking", "terminal"])("stops before generation when choosing the type with --yes fails at %s", async (step) => {
   vi.mocked(select).mockResolvedValue(step === "type" ? Symbol("cancel") : "feat");
   vi.mocked(confirm).mockResolvedValue(Symbol("cancel"));
   if (step === "terminal") process.stdin.isTTY = false;
 
-  await runCommand(commitCommand, { rawArgs: ["-T"] });
+  await runCommand(commitCommand, { rawArgs: ["--yes", "-T"] });
 
   expect(generateCommitMessage).not.toHaveBeenCalled();
   expect(git.stageAll).not.toHaveBeenCalled();

@@ -124,7 +124,7 @@ Stages changes, scans for secrets with Gitleaks when installed, generates Conven
 | `--pull`                    | Pull fast-forward updates before staging              |
 | `-A, --ask-for-branch`      | Ask for a branch before every commit                  |
 | `-s, --staged`              | Commit only already-staged changes                    |
-| `-y, --yes`                 | Skip all prompts; keep the current branch; only push with `--push` |
+| `-y, --yes`                 | Skip default prompts and keep commits local; all explicit flags take precedence |
 
 ```bash
 zapdev commit              # review messages, commit, then confirm push
@@ -136,15 +136,15 @@ zapdev commit --pull       # pull first, then follow the normal flow
 
 Supported types: `feat`, `fix`, `deps`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`. Messages are limited to 72 characters; the model can add `!` for breaking changes.
 
-`--yes` overrides `--ask-for-type` and `--ask-for-branch`; an explicit `--type` still applies.
+All explicit flags override `--yes`, regardless of argument order: `-T` asks for the type and breaking change, `-A` asks for branches, `--push` pushes, `--no-push` keeps commits local, `--pull` pulls first, and `--staged` commits only already-staged changes. `--type`, `--url`, `--model`, and `--effort` still apply. Unrequested prompts stay skipped; `--type` preselects the type when `-T` is set.
 
-**Branches:** before committing on `main`, `master`, `principal`, `dev`, or `development`, zapdev asks for a local branch unless `--yes` is set. A different name switches to an existing branch or creates it **before the commit**. Prompts reuse the previous input; empty input keeps the current branch. `-A` asks on every branch unless `--yes` is set.
+**Branches:** before committing on `main`, `master`, `principal`, `dev`, or `development`, zapdev asks for a local branch unless `--yes` is set. A different name switches to an existing branch or creates it **before the commit**. Prompts reuse the previous input; empty input keeps the current branch. `-A` asks on every branch, including with `--yes`.
 
 **Safety:** a failed Gitleaks scan stops the flow before any commit or sending that repository's diff to the LLM. Without Gitleaks, scanning is skipped. Commit context is sent to your configured endpoint, which may be remote; binary content and patches matching `src/config/diff.gitignore` are omitted, but those files are still committed.
 
 **Git:** `--pull` only pulls repositories with changes to commit and a configured upstream, without rebase or automatic stash. Push uses the current branch's name and its upstream remote, then `origin`, then the only remote; ambiguous or missing remotes are skipped. No force-push. Errors stop the flow without undoing earlier pulls or commits; cancelling branch selection also stops all pushes.
 
-**Without a terminal:** review is skipped, type and branch prompts are refused unless `--yes` is set, and commits stay local unless `--push` is set. Git hooks have a 60-second timeout (`ZD_HOOK_TIMEOUT` to override); interactive hooks must use `/dev/tty`.
+**Without a terminal:** review is skipped, explicit `-T` / `-A` prompts are refused even with `--yes`, and protected branches require `--yes` to commit without a branch prompt. Commits stay local unless `--push` is set. Git hooks have a 60-second timeout (`ZD_HOOK_TIMEOUT` to override); interactive hooks must use `/dev/tty`.
 
 ### Zed IDE
 
