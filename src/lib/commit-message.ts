@@ -7,10 +7,15 @@ export function applyCommitType(systemPrompt: string, type: CommitType): string 
   return `${systemPrompt}\n\nThe type MUST be exactly "${breaking ? type.slice(0, -1) : type}".${breaking ? '\nInclude "!" immediately before ":" to mark a breaking change.' : ""}`;
 }
 
-/** Normalize the first line returned by the model without removing breaking change markers. */
-export function sanitizeCommitMessage(raw: string): string {
+/** Normalize the model's first line and enforce a selected type on valid headers, preserving breaking markers. */
+export function sanitizeCommitMessage(raw: string, type?: CommitType): string {
   const firstLine = raw.split("\n", 1)[0] ?? "";
-  return firstLine.replace(/[`"]/g, "").trim();
+  let message = firstLine.replace(/[`"]/g, "").trim();
+  if (type && !validateCommitMessage(message)) {
+    message = message.replace(/^[a-z]+/, type.replace(/!$/, ""));
+    if (type.endsWith("!")) message = message.replace(/!?: /, "!: ");
+  }
+  return message;
 }
 
 /** Validate a Conventional Commit header, allowing automatic breaking changes with a forced base type. */

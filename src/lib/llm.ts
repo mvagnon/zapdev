@@ -50,7 +50,7 @@ export async function generateCommitMessage(
 
     const content = messageContent(body);
     if (content === null) throw new Error("LLM returned an unexpected response shape.");
-    const message = sanitizeCommitMessage(content);
+    const message = sanitizeCommitMessage(content, type);
     const error = validateCommitMessage(message, type);
     if (!error) return message;
     validationError = error;

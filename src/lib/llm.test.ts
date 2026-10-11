@@ -83,8 +83,32 @@ describe("generateCommitMessage", () => {
   });
 
   it.each([
+    ["fix", "ci(release): use an optional PR number", "fix(release): use an optional PR number"],
+    ["fix", "feat(api)!: remove the old endpoint", "fix(api)!: remove the old endpoint"],
+    ["feat!", "fix: repair the endpoint", "feat!: repair the endpoint"],
+    ["feat!", "fix(api): repair the endpoint", "feat(api)!: repair the endpoint"],
+    ["feat!", "fix(api)!: remove the old endpoint", "feat(api)!: remove the old endpoint"],
+  ] as const)("enforces type=%s without retrying a valid header", async (type, content, expected) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ choices: [{ message: { content } }] }),
+    );
+    await expect(generateCommitMessage(diff, config, type)).resolves.toBe(expected);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("revalidates the length after enforcing the selected type", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: `ci: ${"x".repeat(68)}` } }] }))
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: "feat: update automation" } }] }));
+
+    await expect(generateCommitMessage(diff, config, "feat!")).resolves.toBe("feat!: update automation");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]![1]!.body).toContain("at most 72 characters");
+  });
+
+  it.each([
     [undefined, "banana: invalid"], [undefined, "feat: "], [undefined, `feat: ${"x".repeat(70)}`],
-    ["feat!", "feat: remove the endpoint"], ["feat", "fix: repair the endpoint"],
+    ["feat!", "banana: invalid"], ["feat", "fix: "],
   ] as const)("retries an invalid message once (type=%s, message=%s)", async (type, invalid) => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: invalid } }] }))
