@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/mvagnon/zapdev/compare/v3.1.0...v3.1.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **llm:** improve commit message generation pipeline ([755af78](https://github.com/mvagnon/zapdev/commit/755af787f9d4ea60ad9d8ff2c3eca81f4c810507))
+
 ## [3.1.0](https://github.com/mvagnon/zapdev/compare/v3.0.2...v3.1.0) (2026-10-11)
 
 
