@@ -38,7 +38,7 @@ export function prepareCommitContext(diff: string, patterns: string, max: number
   if (fileIndex !== patches.length) throw new Error("Invalid staged diff: inconsistent file inventory.");
 
   const summary = `Changed files:\n${inventory.join("\n")}`;
-  if (summary.length > max) throw new Error("Too many changed files to fit the commit context. Stage fewer files.");
+  if (summary.length > max) return truncatePatch(summary, max);
   let remaining = max - summary.length;
   const selected: string[] = [];
   included.sort((left, right) => left.patch.length - right.patch.length);

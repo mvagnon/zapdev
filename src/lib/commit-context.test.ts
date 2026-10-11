@@ -59,9 +59,19 @@ it("still provides useful context when all content is ignored", () => {
     .toBe('Changed files:\n+1 -0 "yarn.lock" (content omitted)');
 });
 
-it("fails rather than dropping file names when the inventory alone exceeds the budget", () => {
-  expect(() => prepareCommitContext(stagedDiff({ "very-long-name.ts": "+CODE" }), "", 10))
-    .toThrow("Too many changed files");
+it("truncates oversized inventories instead of blocking commit message generation", () => {
+  const files = Object.fromEntries(Array.from({ length: 1_000 }, (_, index) => [`src/file-${index}.ts`, "+CODE"]));
+  const diff = stagedDiff(files);
+  const context = prepareCommitContext(diff, "");
+  expect(context.length).toBeLessThanOrEqual(12_000);
+  expect(context).toContain("Changed files:");
+  expect(context).toContain('"src/file-0.ts"');
+  expect(context).toContain('"src/file-999.ts"');
+  expect(context).toContain("[diff truncated]");
+  expect(context).not.toContain("+CODE");
+  for (let budget = 0; budget < 100; budget++) {
+    expect(prepareCommitContext(diff, "", budget).length).toBeLessThanOrEqual(budget);
+  }
 });
 
 it("respects tiny remaining patch budgets without emitting a whole patch accidentally", () => {
