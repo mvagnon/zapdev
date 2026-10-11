@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.1.0](https://github.com/mvagnon/zapdev/compare/v3.0.2...v3.1.0) (2026-10-11)
+
+
+### Features
+
+* Integrate configurable commit types and prompts ([de2add6](https://github.com/mvagnon/zapdev/commit/de2add65c5b37fc0aaaf2ec722286c36a7235f09))
+
+
+### Bug Fixes
+
+* Enhance command flags and improve prompts for commits ([9ef7260](https://github.com/mvagnon/zapdev/commit/9ef726075b4713a289b43c3b7293879d9c0c8099))
+* **zapdev:** Update CLI help text and prompt logic for clarity ([6a57f91](https://github.com/mvagnon/zapdev/commit/6a57f91acea0f1d09e6aa96f833e0e6f9bfefd49))
+
 ## [3.0.2](https://github.com/mvagnon/zapdev/compare/v3.0.1...v3.0.2) (2026-10-07)
 
 
