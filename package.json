@@ -38,8 +38,9 @@
     "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node20 --loader:.md=text --loader:.gitignore=text --outfile=dist/cli.js && esbuild src/index.ts --platform=node --format=esm --target=node20 --outfile=dist/index.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "knip": "knip",
     "test": "vitest run",
-    "staticchecks": "npm run lint && npm run typecheck && npm run test",
+    "staticchecks": "npm run lint && npm run typecheck && npm run knip && npm run test",
     "prepack": "npm run build"
   },
   "devDependencies": {
@@ -53,6 +54,7 @@
     "eslint": "^10.6.0",
     "ignore": "^5.3.2",
     "jiti": "^2.7.0",
+    "knip": "^6.41.0",
     "tinyexec": "^1.2.4",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.62.1",

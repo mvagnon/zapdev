@@ -91,12 +91,17 @@ From a clone:
 
 ```bash
 npm install
-npm run zapdev      # build then run the CLI in dev
-npm run typecheck   # tsc --noEmit
-npm run lint        # eslint
-npm run test        # vitest
-npm run build       # bundle to dist/ with esbuild
 ```
+
+| Command | Description |
+| ------- | ----------- |
+| `npm run zapdev` | Build and run the CLI |
+| `npm run typecheck` | Check TypeScript types |
+| `npm run lint` | Run ESLint |
+| `npm run knip` | Check unused files, exports, and dependencies |
+| `npm run test` | Run Vitest |
+| `npm run staticchecks` | Run lint, typecheck, Knip, and tests, as in CI |
+| `npm run build` | Bundle to `dist/` with esbuild |
 
 `npm link` exposes the local `zapdev` binary after `npm run build`.
 
