@@ -98,7 +98,7 @@ export const commitCommand = defineCommand({
     yes: {
       type: "boolean",
       alias: "y",
-      description: "Skip commit review; still confirm push unless --push is set.",
+      description: "Skip all prompts, keep the current branch, and only push with --push.",
     },
   },
   async run({ args }) {
@@ -154,7 +154,7 @@ export const commitCommand = defineCommand({
       }
 
       let type = args.type;
-      if (args["ask-for-type"]) {
+      if (args["ask-for-type"] && !args.yes) {
         if (!interactive) throw new Error("Choosing a commit type requires a terminal.");
         const selectedType = await select({
           message: "Commit type",
@@ -217,7 +217,7 @@ export const commitCommand = defineCommand({
         let withGuide = true;
         let targetBranch: string | undefined;
         const current = await currentBranch(draft.repo);
-        if (args["ask-for-branch"] || PROTECTED_BRANCHES.includes(current)) {
+        if (!args.yes && (args["ask-for-branch"] || PROTECTED_BRANCHES.includes(current))) {
           if (!interactive) throw new Error("Choosing a branch before committing requires a terminal. Changes remain staged.");
           const answer = await text({
             message: `${basename(draft.repo)} (${current}): branch to commit to`,
@@ -243,7 +243,7 @@ export const commitCommand = defineCommand({
         toSend.push(draft);
       }
       if (toSend.length === 0) return;
-      if (args.push === false || (!interactive && !args.push)) return;
+      if (args.push === false || ((args.yes || !interactive) && !args.push)) return;
 
       const destinations: { repo: string; label: string; branch: string; remote: string }[] = [];
       for (const { repo, label } of toSend) {
