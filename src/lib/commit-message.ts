@@ -1,4 +1,5 @@
-import { COMMIT_TYPES, type CommitType } from "../types/commit";
+import { COMMIT_TYPES } from "../config/commit-types";
+import type { CommitType } from "../types/commit";
 
 /** Force the commit type and, when requested, its breaking change marker. */
 export function applyCommitType(systemPrompt: string, type: CommitType): string {

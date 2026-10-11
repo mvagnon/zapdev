@@ -13,6 +13,7 @@ import {
   text,
 } from "@clack/prompts";
 
+import { COMMIT_TYPES } from "../config/commit-types";
 import { PROTECTED_BRANCHES } from "../config/protected-branches";
 import { resolveConfig, resolveHookTimeout } from "../lib/config";
 import { validateCommitMessage } from "../lib/commit-message";
@@ -33,7 +34,7 @@ import {
 import { errorMessage } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
-import { COMMIT_TYPES, type CommitType } from "../types/commit";
+import type { CommitType } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 import type { DiffStats } from "../types/git";
 import { runTask } from "./git-task";
@@ -68,6 +69,11 @@ export const commitCommand = defineCommand({
       required: false,
       alias: "t",
       description: `Force the Conventional Commits type (${COMMIT_TYPES.join(", ")}); append ! for a breaking change.`,
+    },
+    "ask-for-type": {
+      type: "boolean",
+      alias: "T",
+      description: "Choose a commit type and confirm a breaking change before generating messages.",
     },
     push: {
       type: "boolean",
@@ -147,6 +153,26 @@ export const commitCommand = defineCommand({
         }
       }
 
+      let type = args.type;
+      if (args["ask-for-type"]) {
+        if (!interactive) throw new Error("Choosing a commit type requires a terminal.");
+        const selectedType = await select({
+          message: "Commit type",
+          initialValue: COMMIT_TYPES.find((supported) => supported === type?.replace(/!$/, "")),
+          options: COMMIT_TYPES.map((value) => ({ value, label: value })),
+        });
+        if (isCancel(selectedType)) {
+          cancel("Cancelled.");
+          return;
+        }
+        const breaking = await confirm({ message: "Breaking change?", initialValue: false });
+        if (isCancel(breaking)) {
+          cancel("Cancelled.");
+          return;
+        }
+        type = breaking ? `${selectedType}!` : selectedType;
+      }
+
       const repositories: Repository[] = repos.map((repo) => ({ repo, label: basename(repo), pendingLabel: basename(repo) }));
       const { results, scan } = await runTask("Preparing repositories and generating commit messages in parallel", "Repositories prepared", async (onOutput, onHook) => {
         const scan = await hasGitleaks();
@@ -160,7 +186,7 @@ export const commitCommand = defineCommand({
           if (!diff.trim()) return null;
           const stats = await getStagedDiffStats(repo);
           if (scan) await scanStagedChanges(repo, onOutput);
-          const message = await generateCommitMessage(diff, config, args.type);
+          const message = await generateCommitMessage(diff, config, type);
           if (!message) throw new Error("The model returned an empty message.");
           return { ...repository, message, stats };
         }));
@@ -179,7 +205,7 @@ export const commitCommand = defineCommand({
         }
       }
 
-      const selected = drafts.length ? await reviewMessages(drafts, interactive && !args.yes, args.type) : [];
+      const selected = drafts.length ? await reviewMessages(drafts, interactive && !args.yes, type) : [];
       if (!selected) {
         cancel("Cancelled (changes left staged).");
         return;

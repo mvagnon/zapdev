@@ -9,7 +9,7 @@ Strictly follow this format:
 type(scope): description
 ```
 
-Choose a type from: feat, fix, deps, chore, docs, style, refactor, perf, test, build, ci, revert.
+Choose a type from: {{COMMIT_TYPES}}.
 Choose the type by the observable effect, not the file extension:
 - feat: adds a capability or user-visible behavior.
 - fix: corrects incorrect behavior.

@@ -794,6 +794,35 @@ it.each(["feat", "deps", "feat!", "fix!", "refactor!", "deps!"])("passes the exp
   expect(generateCommitMessage).toHaveBeenCalledWith("/repos/front", expect.any(Object), type);
 });
 
+it.each([["--ask-for-type", false], ["-T", true]] as const)("uses the chosen type for every generation with %s (breaking=%s)", async (flag, breaking) => {
+  vi.mocked(select).mockResolvedValue("feat");
+  vi.mocked(confirm).mockResolvedValue(breaking);
+  vi.mocked(generateCommitMessage).mockImplementation(async (diff, _config, type) => {
+    expect(type).toBe(breaking ? "feat!" : "feat");
+    expect(confirm).toHaveBeenCalledTimes(1);
+    return `${type}: ${basename(diff)}`;
+  });
+
+  await runCommand(commitCommand, { rawArgs: [flag, "--yes", "--no-push"] });
+
+  expect(generateCommitMessage).toHaveBeenCalledTimes(repos.length);
+  expect(git.commit).toHaveBeenCalledTimes(repos.length);
+  expect(process.exitCode).toBeUndefined();
+});
+
+it.each(["type", "breaking", "terminal"])("stops before generation when choosing the type fails at %s", async (step) => {
+  vi.mocked(select).mockResolvedValue(step === "type" ? Symbol("cancel") : "feat");
+  vi.mocked(confirm).mockResolvedValue(Symbol("cancel"));
+  if (step === "terminal") process.stdin.isTTY = false;
+
+  await runCommand(commitCommand, { rawArgs: ["-T", "--yes"] });
+
+  expect(generateCommitMessage).not.toHaveBeenCalled();
+  expect(git.stageAll).not.toHaveBeenCalled();
+  expect(git.commit).not.toHaveBeenCalled();
+  expect(process.exitCode).toBe(step === "terminal" ? 1 : undefined);
+});
+
 it.each(["FEAT", " feat ", "banana", "", "feat!!", "!feat", "feat(scope)!"])("rejects noncanonical commit types through Citty before staging: %j", async (type) => {
   await expect(runCommand(commitCommand, { rawArgs: ["--yes", "--type", type] })).rejects.toThrow("Invalid value for argument");
   expect(git.stageAll).not.toHaveBeenCalled();

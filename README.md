@@ -118,12 +118,13 @@ Stages changes, scans for secrets with Gitleaks when installed, generates Conven
 | `--model <model>`           | Override the model                                    |
 | `--effort <effort>`         | Override the reasoning effort                         |
 | `-t, --type <type>`         | Force a commit type; append `!` for a breaking change |
+| `-T, --ask-for-type`        | Choose a type for all commits, then confirm breaking (default: no) |
 | `-p, --push`                | Push without confirmation                             |
 | `--no-push`, `--push=false` | Keep commits local without confirmation               |
 | `--pull`                    | Pull fast-forward updates before staging              |
 | `-A, --ask-for-branch`      | Ask for a branch before every commit                  |
 | `-s, --staged`              | Commit only already-staged changes                    |
-| `-y, --yes`                 | Skip review, not branch or push prompts               |
+| `-y, --yes`                 | Skip review, not type, branch or push prompts         |
 
 ```bash
 zapdev commit              # review messages, commit, then confirm push
@@ -141,7 +142,7 @@ Supported types: `feat`, `fix`, `deps`, `chore`, `docs`, `style`, `refactor`, `p
 
 **Git:** `--pull` only pulls repositories with changes to commit and a configured upstream, without rebase or automatic stash. Push uses the current branch's name and its upstream remote, then `origin`, then the only remote; ambiguous or missing remotes are skipped. No force-push. Errors stop the flow without undoing earlier pulls or commits; cancelling branch selection also stops all pushes.
 
-**Without a terminal:** review is skipped, commits requiring a branch prompt are refused, and commits stay local unless `--push` is set. Git hooks have a 60-second timeout (`ZD_HOOK_TIMEOUT` to override); interactive hooks must use `/dev/tty`.
+**Without a terminal:** review is skipped, `--ask-for-type` and commits requiring a branch prompt are refused, and commits stay local unless `--push` is set. Git hooks have a 60-second timeout (`ZD_HOOK_TIMEOUT` to override); interactive hooks must use `/dev/tty`.
 
 ### Zed IDE
 
