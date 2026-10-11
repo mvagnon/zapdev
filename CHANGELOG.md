@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.2](https://github.com/mvagnon/zapdev/compare/v3.1.1...v3.1.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **context:** truncate oversized inventories instead of throwing error ([8dbeff0](https://github.com/mvagnon/zapdev/commit/8dbeff000e2d1489a3645a6eeb2e0469f1368780))
+
 ## [3.1.1](https://github.com/mvagnon/zapdev/compare/v3.1.0...v3.1.1) (2026-10-11)
 
 
