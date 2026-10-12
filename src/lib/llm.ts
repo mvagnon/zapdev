@@ -2,6 +2,7 @@ import { COMMIT_DIFF_IGNORE_PATTERNS, COMMIT_SYSTEM_PROMPT } from "../prompts";
 import type { CommitType } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 import { prepareCommitContext } from "./commit-context";
+import { InvalidCommitMessageError } from "./errors";
 import {
   applyCommitType,
   sanitizeCommitMessage,
@@ -28,71 +29,79 @@ export async function generateCommitMessage(
       },
     ];
 
-  let validationError = "";
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let response: Response;
-    let body: unknown;
-    try {
-      response = await fetch(config.url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(config.apiKey
-            ? { Authorization: `Bearer ${config.apiKey}` }
-            : {}),
-          ...(new URL(config.url).hostname === "openrouter.ai"
-            ? {
-                "HTTP-Referer": "https://www.npmjs.com/package/zapdev",
-                "X-OpenRouter-Title": "zapdev CLI",
-              }
-            : {}),
-        },
-        body: JSON.stringify({
-          model: config.model,
-          stream: false,
-          reasoning_effort: config.effort,
-          messages,
-        }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-      const text = await response.text();
+  async function generate(): Promise<string> {
+    const rejectedResponses: string[] = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let response: Response;
+      let body: unknown;
       try {
-        body = JSON.parse(text);
-      } catch {
-        body = null;
+        response = await fetch(config.url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(config.apiKey
+              ? { Authorization: `Bearer ${config.apiKey}` }
+              : {}),
+            ...(new URL(config.url).hostname === "openrouter.ai"
+              ? {
+                  "HTTP-Referer": "https://www.npmjs.com/package/zapdev",
+                  "X-OpenRouter-Title": "zapdev CLI",
+                }
+              : {}),
+          },
+          body: JSON.stringify({
+            model: config.model,
+            stream: false,
+            reasoning_effort: config.effort,
+            messages,
+          }),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        const text = await response.text();
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = null;
+        }
+      } catch (error) {
+        throw new Error(describeRequestError(error), { cause: error });
       }
-    } catch (error) {
-      throw new Error(describeRequestError(error), { cause: error });
-    }
 
-    const apiError = serverError(body);
-    if (!response.ok || apiError !== null) {
-      const diagnostic = `LLM error (HTTP ${response.status}): ${apiError ?? "Request failed."}`;
-      throw new Error(
-        config.apiKey
-          ? diagnostic.replaceAll(config.apiKey, "[redacted]")
-          : diagnostic,
+      const apiError = serverError(body);
+      if (!response.ok || apiError !== null) {
+        const diagnostic = `LLM error (HTTP ${response.status}): ${apiError ?? "Request failed."}`;
+        throw new Error(
+          config.apiKey
+            ? diagnostic.replaceAll(config.apiKey, "[redacted]")
+            : diagnostic,
+        );
+      }
+
+      const content = messageContent(body);
+      if (content === null)
+        throw new Error("LLM returned an unexpected response shape.");
+      const message = sanitizeCommitMessage(content, type);
+      const error = validateCommitMessage(message, type);
+      if (!error) return message;
+      rejectedResponses.push(
+        `Rejected response ${attempt + 1} (${content.length} characters): ${JSON.stringify(content)}`
+        + (content !== message ? `\nValidated message (${message.length} characters): ${JSON.stringify(message)}` : "")
+        + `\n${error}`,
+      );
+      messages.push(
+        { role: "assistant", content },
+        {
+          role: "user",
+          content: `Invalid commit message: ${error}\nMessage checked: ${JSON.stringify(message)}\nReturn only a corrected commit message for the same changes.`,
+        },
       );
     }
-
-    const content = messageContent(body);
-    if (content === null)
-      throw new Error("LLM returned an unexpected response shape.");
-    const message = sanitizeCommitMessage(content, type);
-    const error = validateCommitMessage(message, type);
-    if (!error) return message;
-    validationError = error;
-    messages.push(
-      { role: "assistant", content: message.slice(0, 200) },
-      {
-        role: "user",
-        content: `Invalid commit message: ${error} Return only a corrected commit message for the same changes.`,
-      },
+    throw new InvalidCommitMessageError(
+      `LLM returned an invalid commit message after two attempts:\n${rejectedResponses.join("\n\n")}`,
+      generate,
     );
   }
-  throw new Error(
-    `LLM returned an invalid commit message after two attempts: ${validationError}`,
-  );
+  return generate();
 }
 
 function describeRequestError(error: unknown): string {

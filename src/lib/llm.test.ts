@@ -7,6 +7,7 @@ vi.mock("../prompts", () => ({
 
 import type { ZapdevConfig } from "../types/config";
 import { resolveConfig } from "./config";
+import { InvalidCommitMessageError } from "./errors";
 import { generateCommitMessage } from "./llm";
 
 const config: ZapdevConfig = {
@@ -181,7 +182,7 @@ describe("generateCommitMessage", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const retry: { messages: { role: string; content: string }[] } = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string);
     expect(retry.messages).toEqual(expect.arrayContaining([
-      { role: "assistant", content: invalid.trim() },
+      { role: "assistant", content: invalid },
       { role: "user", content: expect.stringContaining("Invalid commit message:") },
     ]));
   });
@@ -192,5 +193,53 @@ describe("generateCommitMessage", () => {
     );
     await expect(generateCommitMessage(diff, config)).rejects.toThrow("invalid commit message after two attempts");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows both rejected responses safely and keeps the full raw response in the conversation", async () => {
+    const message = `feat: ${"x".repeat(90)}`;
+    const raw = `  \`${message}\`\n${"Explanation. ".repeat(30)}\u001b[31m`;
+    const second = "banana: invalid";
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: raw } }] }))
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: second } }] }))
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: "fix: test" } }] }));
+
+    const error: unknown = await generateCommitMessage(diff, config).catch((error: unknown) => error);
+    if (!(error instanceof InvalidCommitMessageError)) throw new Error("Expected an invalid commit message error.");
+    expect(error.message).toContain(`Rejected response 1 (${raw.length} characters): ${JSON.stringify(raw)}`);
+    expect(error.message).toContain(`Validated message (96 characters): ${JSON.stringify(message)}`);
+    expect(error.message).toContain("received 96). Shorten it by at least 24 characters.");
+    expect(error.message).toContain(`Rejected response 2 (${second.length} characters): ${JSON.stringify(second)}`);
+    expect(error.message).not.toContain("\u001b");
+
+    await expect(error.retry()).resolves.toBe("fix: test");
+    for (const call of fetchMock.mock.calls.slice(1)) {
+      const request: { messages: { role: string; content: string }[] } = JSON.parse(call[1]!.body as string);
+      expect(request.messages[2]).toEqual({ role: "assistant", content: raw });
+      expect(request.messages[3]!.content).toContain("received 96). Shorten it by at least 24 characters.");
+    }
+  });
+
+  it("sends all validation problems and retains the conversation when retrying", async () => {
+    const invalid = `banana: ${"x".repeat(70)}\tmore`;
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: invalid } }] }))
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: invalid } }] }))
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: "feat!: remove the old endpoint" } }] }));
+
+    const error: unknown = await generateCommitMessage(diff, config, "feat!").catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(InvalidCommitMessageError);
+    if (!(error instanceof InvalidCommitMessageError)) throw new Error("Expected an invalid commit message error.");
+    await expect(error.retry()).resolves.toBe("feat!: remove the old endpoint");
+
+    const correction: { messages: { role: string; content: string }[] } = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string);
+    expect(correction.messages.at(-1)!.content).toContain("at most 72 characters");
+    expect(correction.messages.at(-1)!.content).toContain("without control characters");
+    expect(correction.messages.at(-1)!.content).toContain("Supported types:");
+    expect(correction.messages.at(-1)!.content).toContain('The type must be exactly "feat".');
+    expect(correction.messages.at(-1)!.content).toContain('Include "!" immediately before ":"');
+    const retry: { messages: { role: string; content: string }[] } = JSON.parse(fetchMock.mock.calls[2]![1]!.body as string);
+    expect(retry.messages.slice(0, correction.messages.length)).toEqual(correction.messages);
+    expect(retry.messages).toHaveLength(6);
   });
 });

@@ -18,16 +18,17 @@ export function sanitizeCommitMessage(raw: string, type?: CommitType): string {
   return message;
 }
 
-/** Validate a Conventional Commit header, allowing automatic breaking changes with a forced base type. */
+/** Report all validation problems in a Conventional Commit header, allowing automatic breaking changes. */
 export function validateCommitMessage(message: string, type?: CommitType): string | undefined {
-  if (!message.trim()) return "Message cannot be empty.";
-  if (message.length > 72) return "The commit message must be at most 72 characters.";
-  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(message)) return "The commit message must be one line without control characters.";
+  const errors: string[] = [];
+  if (!message.trim()) errors.push("Message cannot be empty.");
+  if (message.length > 72) errors.push(`The commit message must be at most 72 characters (received ${message.length}). Shorten it by at least ${message.length - 72} characters.`);
+  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(message)) errors.push("The commit message must be one line without control characters.");
   const match = /^([a-z]+)(?:\([^()\s]+\))?(!)?: (\S.*)$/.exec(message);
-  if (!match || !COMMIT_TYPES.some((supported) => supported === match[1])) {
-    return `Use type(scope)!: description, with optional scope and !. Supported types: ${COMMIT_TYPES.join(", ")}.`;
+  if (message.trim() && (!match || !COMMIT_TYPES.some((supported) => supported === match[1]))) {
+    errors.push(`Use type(scope)!: description, with optional scope and !. Supported types: ${COMMIT_TYPES.join(", ")}.`);
   }
-  if (type && match[1] !== type.replace(/!$/, "")) return `The type must be exactly "${type.replace(/!$/, "")}".`;
-  if (type?.endsWith("!") && !match[2]) return 'Include "!" immediately before ":" to mark a breaking change.';
-  return undefined;
+  if (type && match && match[1] !== type.replace(/!$/, "")) errors.push(`The type must be exactly "${type.replace(/!$/, "")}".`);
+  if (type?.endsWith("!") && match && !match[2]) errors.push('Include "!" immediately before ":" to mark a breaking change.');
+  return errors.length ? errors.join("\n") : undefined;
 }

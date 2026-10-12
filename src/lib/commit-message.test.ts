@@ -7,6 +7,25 @@ import {
 } from "./commit-message";
 
 describe("validateCommitMessage", () => {
+  it("reports the exact length and required reduction", () => {
+    expect(validateCommitMessage(`feat: ${"x".repeat(88)}`)).toBe(
+      "The commit message must be at most 72 characters (received 94). Shorten it by at least 22 characters.",
+    );
+  });
+
+  it("reports every detectable validation problem together", () => {
+    const error = validateCommitMessage(`banana: ${"x".repeat(70)}\tmore`, "feat!");
+    expect(error).toContain("at most 72 characters");
+    expect(error).toContain("without control characters");
+    expect(error).toContain("Supported types:");
+    expect(error).toContain('The type must be exactly "feat".');
+    expect(error).toContain('Include "!" immediately before ":"');
+    const blankError = validateCommitMessage(`${" ".repeat(73)}\t`);
+    expect(blankError).toContain("Message cannot be empty.");
+    expect(blankError).toContain("at most 72 characters");
+    expect(blankError).toContain("without control characters");
+  });
+
   it.each(["feat: add an endpoint", "deps: update packages", "feat!: remove an endpoint", "refactor(api)!: remove the old API"])("accepts %s", (message) => {
     expect(validateCommitMessage(message)).toBeUndefined();
   });
