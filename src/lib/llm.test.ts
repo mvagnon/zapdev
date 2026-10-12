@@ -6,6 +6,7 @@ vi.mock("../prompts", () => ({
 }));
 
 import type { ZapdevConfig } from "../types/config";
+import { resolveConfig } from "./config";
 import { generateCommitMessage } from "./llm";
 
 const config: ZapdevConfig = {
@@ -21,16 +22,22 @@ afterEach(() => {
 });
 
 describe("generateCommitMessage", () => {
-  it("uses the exact endpoint and Chat Completions contract, then sanitizes the result", async () => {
+  it.each([undefined, "", "  ", " test-key "])("uses the Chat Completions contract with optional authentication (%j)", async (apiKey) => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ choices: [{ message: { content: '`fix: test`\nExplanation' } }] }),
     );
 
-    await expect(generateCommitMessage(diff, config)).resolves.toBe("fix: test");
+    const resolvedConfig = resolveConfig({
+      ZD_URL: config.url, ZD_MODEL: config.model, ZD_EFFORT: config.effort, ZD_API_KEY: apiKey,
+    });
+    await expect(generateCommitMessage(diff, resolvedConfig)).resolves.toBe("fix: test");
 
     expect(fetchMock).toHaveBeenCalledExactlyOnceWith(config.url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(apiKey?.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
+      },
       body: JSON.stringify({
         model: "my-model",
         stream: false,

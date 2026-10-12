@@ -3,4 +3,5 @@ export type ZapdevConfig = {
   url: string;
   model: string;
   effort: string;
+  apiKey?: string;
 };

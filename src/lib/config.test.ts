@@ -24,8 +24,8 @@ describe("resolveConfig", () => {
 
   it("reads and trims settings without changing the endpoint path or query", () => {
     const url = "https://host/custom/chat/?version=1";
-    expect(resolveConfig({ ZD_URL: ` ${url} `, ZD_MODEL: " my-model ", ZD_EFFORT: " low " })).toEqual({
-      url, model: "my-model", effort: "low",
+    expect(resolveConfig({ ZD_URL: ` ${url} `, ZD_MODEL: " my-model ", ZD_EFFORT: " low ", ZD_API_KEY: " test-key " })).toEqual({
+      url, model: "my-model", effort: "low", apiKey: "test-key",
     });
   });
 

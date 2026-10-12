@@ -32,5 +32,5 @@ export function resolveConfig(
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("URL must be a complete HTTP(S) Chat Completions endpoint.");
   }
-  return config;
+  return { ...config, apiKey: (overrides.apiKey ?? env.ZD_API_KEY)?.trim() || undefined };
 }

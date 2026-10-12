@@ -25,7 +25,10 @@ export async function generateCommitMessage(
     try {
       response = await fetch(config.url, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+        },
         body: JSON.stringify({
           model: config.model,
           stream: false,
