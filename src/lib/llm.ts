@@ -44,7 +44,6 @@ export async function generateCommitMessage(
             ? {
                 "HTTP-Referer": "https://www.npmjs.com/package/zapdev",
                 "X-OpenRouter-Title": "zapdev CLI",
-                "Content-Type": "application/json",
               }
             : {}),
         },
