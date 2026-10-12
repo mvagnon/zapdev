@@ -22,7 +22,6 @@ export function sanitizeCommitMessage(raw: string, type?: CommitType): string {
 export function validateCommitMessage(message: string, type?: CommitType): string | undefined {
   const errors: string[] = [];
   if (!message.trim()) errors.push("Message cannot be empty.");
-  if (message.length > 72) errors.push(`The commit message must be at most 72 characters (received ${message.length}). Shorten it by at least ${message.length - 72} characters.`);
   if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(message)) errors.push("The commit message must be one line without control characters.");
   const match = /^([a-z]+)(?:\([^()\s]+\))?(!)?: (\S.*)$/.exec(message);
   if (message.trim() && (!match || !COMMIT_TYPES.some((supported) => supported === match[1]))) {

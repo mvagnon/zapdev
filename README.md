@@ -168,7 +168,7 @@ zapdev commit -syp         # commit staged changes and push without review
 zapdev commit --pull       # pull first, then follow the normal flow
 ```
 
-Supported types: `feat`, `fix`, `deps`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`. Messages are limited to 72 characters; the model can add `!` for breaking changes.
+Supported types: `feat`, `fix`, `deps`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`. Messages should aim for 72 characters, but longer messages are accepted; the model can add `!` for breaking changes.
 
 All explicit flags override `--yes`, regardless of argument order: `-T` asks for the type and breaking change, `-A` asks for branches, `--push` pushes, `--no-push` keeps commits local, `--pull` pulls first, and `--staged` commits only already-staged changes. `--type`, `--url`, `--model`, and `--effort` still apply. Unrequested prompts stay skipped; `--type` preselects the type when `-T` is set.
 

@@ -160,18 +160,16 @@ describe("generateCommitMessage", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("revalidates the length after enforcing the selected type", async () => {
+  it.each([68, 200])("accepts long messages and enforces the selected type without retrying (%i)", async (length) => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: `ci: ${"x".repeat(68)}` } }] }))
-      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: "feat: update automation" } }] }));
+      .mockImplementation(async () => Response.json({ choices: [{ message: { content: `ci: ${"x".repeat(length)}` } }] }));
 
-    await expect(generateCommitMessage(diff, config, "feat!")).resolves.toBe("feat!: update automation");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]![1]!.body).toContain("at most 72 characters");
+    await expect(generateCommitMessage(diff, config, "feat!")).resolves.toBe(`feat!: ${"x".repeat(length)}`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it.each([
-    [undefined, "banana: invalid"], [undefined, "feat: "], [undefined, `feat: ${"x".repeat(70)}`],
+    [undefined, "banana: invalid"], [undefined, "feat: "],
     ["feat!", "banana: invalid"], ["feat", "fix: "],
   ] as const)("retries an invalid message once (type=%s, message=%s)", async (type, invalid) => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
@@ -196,7 +194,7 @@ describe("generateCommitMessage", () => {
   });
 
   it("shows both rejected responses safely and keeps the full raw response in the conversation", async () => {
-    const message = `feat: ${"x".repeat(90)}`;
+    const message = `feat: ${"x".repeat(90)}\tmore`;
     const raw = `  \`${message}\`\n${"Explanation. ".repeat(30)}\u001b[31m`;
     const second = "banana: invalid";
     const fetchMock = vi.spyOn(globalThis, "fetch")
@@ -207,8 +205,8 @@ describe("generateCommitMessage", () => {
     const error: unknown = await generateCommitMessage(diff, config).catch((error: unknown) => error);
     if (!(error instanceof InvalidCommitMessageError)) throw new Error("Expected an invalid commit message error.");
     expect(error.message).toContain(`Rejected response 1 (${raw.length} characters): ${JSON.stringify(raw)}`);
-    expect(error.message).toContain(`Validated message (96 characters): ${JSON.stringify(message)}`);
-    expect(error.message).toContain("received 96). Shorten it by at least 24 characters.");
+    expect(error.message).toContain(`Validated message (${message.length} characters): ${JSON.stringify(message)}`);
+    expect(error.message).toContain("without control characters");
     expect(error.message).toContain(`Rejected response 2 (${second.length} characters): ${JSON.stringify(second)}`);
     expect(error.message).not.toContain("\u001b");
 
@@ -216,7 +214,7 @@ describe("generateCommitMessage", () => {
     for (const call of fetchMock.mock.calls.slice(1)) {
       const request: { messages: { role: string; content: string }[] } = JSON.parse(call[1]!.body as string);
       expect(request.messages[2]).toEqual({ role: "assistant", content: raw });
-      expect(request.messages[3]!.content).toContain("received 96). Shorten it by at least 24 characters.");
+      expect(request.messages[3]!.content).toContain("without control characters");
     }
   });
 
@@ -233,7 +231,6 @@ describe("generateCommitMessage", () => {
     await expect(error.retry()).resolves.toBe("feat!: remove the old endpoint");
 
     const correction: { messages: { role: string; content: string }[] } = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string);
-    expect(correction.messages.at(-1)!.content).toContain("at most 72 characters");
     expect(correction.messages.at(-1)!.content).toContain("without control characters");
     expect(correction.messages.at(-1)!.content).toContain("Supported types:");
     expect(correction.messages.at(-1)!.content).toContain('The type must be exactly "feat".');

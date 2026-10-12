@@ -7,22 +7,18 @@ import {
 } from "./commit-message";
 
 describe("validateCommitMessage", () => {
-  it("reports the exact length and required reduction", () => {
-    expect(validateCommitMessage(`feat: ${"x".repeat(88)}`)).toBe(
-      "The commit message must be at most 72 characters (received 94). Shorten it by at least 22 characters.",
-    );
+  it.each([72, 73, 100, 200, 1_000])("accepts a valid header of %i characters", (length) => {
+    expect(validateCommitMessage(`feat: ${"x".repeat(length - 6)}`)).toBeUndefined();
   });
 
   it("reports every detectable validation problem together", () => {
     const error = validateCommitMessage(`banana: ${"x".repeat(70)}\tmore`, "feat!");
-    expect(error).toContain("at most 72 characters");
     expect(error).toContain("without control characters");
     expect(error).toContain("Supported types:");
     expect(error).toContain('The type must be exactly "feat".');
     expect(error).toContain('Include "!" immediately before ":"');
     const blankError = validateCommitMessage(`${" ".repeat(73)}\t`);
     expect(blankError).toContain("Message cannot be empty.");
-    expect(blankError).toContain("at most 72 characters");
     expect(blankError).toContain("without control characters");
   });
 
@@ -30,7 +26,7 @@ describe("validateCommitMessage", () => {
     expect(validateCommitMessage(message)).toBeUndefined();
   });
 
-  it.each(["", "banana: invalid", "FEAT: invalid", "feat: ", "feat!: ", "feat!!: invalid", "feat(): invalid", "feat: first\nsecond", `feat: ${"x".repeat(67)}`])("rejects %j", (message) => {
+  it.each(["", "banana: invalid", "FEAT: invalid", "feat: ", "feat!: ", "feat!!: invalid", "feat(): invalid", "feat: first\nsecond"])("rejects %j", (message) => {
     expect(validateCommitMessage(message)).toEqual(expect.any(String));
   });
 
