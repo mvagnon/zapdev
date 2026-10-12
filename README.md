@@ -72,19 +72,47 @@ or
 bun install -g zapdev
 ```
 
-Configure your endpoint and model before running `commit` (replace these example values):
-
-```bash
-export ZD_URL="http://localhost:1234/v1/chat/completions"
-export ZD_MODEL="your-model-id"
-export ZD_EFFORT="low"
-```
-
 Or run it once without installing:
 
 ```bash
 npx zapdev commit
 ```
+
+### Model Configuration
+
+Choose one configuration before running `zapdev commit`. Use the complete Chat Completions URL, not just the API base URL.
+
+#### Local model
+
+Start an OpenAI-compatible local server and load a model (for example, in LM Studio), then use its model identifier and supported reasoning effort:
+
+```bash
+export ZD_URL="http://localhost:1234/v1/chat/completions"
+export ZD_MODEL="your-local-model-id"
+export ZD_EFFORT="low"
+unset ZD_API_KEY
+zapdev commit
+```
+
+No API key is needed for a server without authentication. If your local server requires one, set `ZD_API_KEY` instead.
+
+#### OpenRouter
+
+Create an API key at [OpenRouter](https://openrouter.ai/settings/keys) and choose an available [model ID](https://openrouter.ai/models):
+
+```bash
+export ZD_URL="https://openrouter.ai/api/v1/chat/completions"
+export ZD_MODEL="google/gemma-4-31b-it:free"
+export ZD_EFFORT="none"
+export ZD_API_KEY="your-openrouter-api-key"
+zapdev commit
+```
+
+Model availability, free-model quotas, and supported reasoning efforts depend on the model and provider. Keep your API key private.
+
+Requests to `openrouter.ai` automatically include `HTTP-Referer: https://www.npmjs.com/package/zapdev` and `X-OpenRouter-Title: zapdev CLI` for app attribution. These headers are not sent to local servers or other endpoints.
+
+Provider errors display the HTTP status and available error code, provider name, error type, and raw details; JSON details are formatted for readability. Errors returned inside HTTP 200 responses also stop the commit flow. Check [OpenRouter Activity](https://openrouter.ai/activity) for additional diagnostics.
 
 ### Development Setup
 

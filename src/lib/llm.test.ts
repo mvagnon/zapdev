@@ -55,13 +55,69 @@ describe("generateCommitMessage", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ error: { message: "model unavailable" } }, { status: 503 }),
     );
-    await expect(generateCommitMessage(diff, config)).rejects.toThrow("LLM error: model unavailable");
+    await expect(generateCommitMessage(diff, config)).rejects.toThrow("LLM error (HTTP 503): model unavailable");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("reports the HTTP status when the error response is not JSON", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("Bad Gateway", { status: 502 }));
     await expect(generateCommitMessage(diff, config)).rejects.toThrow("HTTP 502");
+  });
+
+  it.each([
+    ["https://openrouter.ai/api/v1/chat/completions", true],
+    ["https://openrouter.ai.example.com/chat/completions", false],
+  ])("sends attribution only to OpenRouter (%s)", async (url, attributed) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ choices: [{ message: { content: "fix: test" } }] }),
+    );
+    await generateCommitMessage(diff, { ...config, url, apiKey: "test-key" });
+    expect(fetchMock.mock.calls[0]![1]!.headers).toEqual({
+      "content-type": "application/json",
+      Authorization: "Bearer test-key",
+      ...(attributed ? {
+        "HTTP-Referer": "https://www.npmjs.com/package/zapdev",
+        "X-OpenRouter-Title": "zapdev CLI",
+      } : {}),
+    });
+  });
+
+  it.each([
+    [400, "top-level", JSON.stringify({ error: { message: "Unsupported effort", code: "invalid_parameter" } })],
+    [200, "top-level", { error: { message: "Unsupported effort", code: "invalid_parameter" } }],
+    [200, "choice", "Unsupported effort"],
+  ])("reports provider details without accepting partial output (%s, %s)", async (status, location, raw) => {
+    const error = {
+      code: 400,
+      message: "Provider returned error",
+      metadata: {
+        provider_name: "Test provider",
+        error_type: "invalid_request",
+        provider_code: "invalid_parameter",
+        raw,
+      },
+    };
+    const choice = { message: { content: "fix: partial output" }, finish_reason: "error" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(
+      location === "choice" ? { error: null, choices: [{ ...choice, error }] } : { error, choices: [choice] },
+      { status },
+    ));
+    const details = typeof raw === "string" && location === "choice"
+      ? raw
+      : JSON.stringify({ error: { message: "Unsupported effort", code: "invalid_parameter" } }, null, 2);
+    await expect(generateCommitMessage(diff, config)).rejects.toThrow(
+      `LLM error (HTTP ${status}): Provider returned error\nCode: 400\nProvider: Test provider\nType: invalid_request\nProvider code: invalid_parameter\nDetails:\n${details}`,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not expose the API key echoed in provider errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
+      error: { message: "Invalid test-secret", metadata: { raw: "Rejected Bearer test-secret" } },
+    }, { status: 401 }));
+    await expect(generateCommitMessage(diff, { ...config, apiKey: "test-secret" })).rejects.toThrow(
+      "LLM error (HTTP 401): Invalid [redacted]\nDetails:\nRejected Bearer [redacted]",
+    );
   });
 
   it.each([null, {}, { choices: [] }, { choices: [null] }, { choices: [{ message: { content: null } }] }])(

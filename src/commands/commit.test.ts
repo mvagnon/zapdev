@@ -38,6 +38,7 @@ beforeEach(() => {
   vi.stubEnv("ZD_URL", "http://localhost:1234/v1/chat/completions");
   vi.stubEnv("ZD_MODEL", "test-model");
   vi.stubEnv("ZD_EFFORT", "low");
+  vi.stubEnv("ZD_API_KEY", undefined);
   vi.stubEnv("ZD_HOOK_TIMEOUT", undefined);
   vi.stubEnv("NO_COLOR", "1");
   vi.stubEnv("FORCE_COLOR", undefined);

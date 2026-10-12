@@ -2,7 +2,11 @@ import { COMMIT_DIFF_IGNORE_PATTERNS, COMMIT_SYSTEM_PROMPT } from "../prompts";
 import type { CommitType } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 import { prepareCommitContext } from "./commit-context";
-import { applyCommitType, sanitizeCommitMessage, validateCommitMessage } from "./commit-message";
+import {
+  applyCommitType,
+  sanitizeCommitMessage,
+  validateCommitMessage,
+} from "./commit-message";
 
 const REQUEST_TIMEOUT_MS = 25_000;
 
@@ -12,11 +16,17 @@ export async function generateCommitMessage(
   config: ZapdevConfig,
   type?: CommitType,
 ): Promise<string> {
-  const systemPrompt = type ? applyCommitType(COMMIT_SYSTEM_PROMPT, type) : COMMIT_SYSTEM_PROMPT;
-  const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: prepareCommitContext(diff, COMMIT_DIFF_IGNORE_PATTERNS) },
-  ];
+  const systemPrompt = type
+    ? applyCommitType(COMMIT_SYSTEM_PROMPT, type)
+    : COMMIT_SYSTEM_PROMPT;
+  const messages: { role: "system" | "user" | "assistant"; content: string }[] =
+    [
+      { role: "system", content: systemPrompt },
+      {
+        role: "user",
+        content: prepareCommitContext(diff, COMMIT_DIFF_IGNORE_PATTERNS),
+      },
+    ];
 
   let validationError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -27,7 +37,16 @@ export async function generateCommitMessage(
         method: "POST",
         headers: {
           "content-type": "application/json",
-          ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+          ...(config.apiKey
+            ? { Authorization: `Bearer ${config.apiKey}` }
+            : {}),
+          ...(new URL(config.url).hostname === "openrouter.ai"
+            ? {
+                "HTTP-Referer": "https://www.npmjs.com/package/zapdev",
+                "X-OpenRouter-Title": "zapdev CLI",
+                "Content-Type": "application/json",
+              }
+            : {}),
         },
         body: JSON.stringify({
           model: config.model,
@@ -47,22 +66,34 @@ export async function generateCommitMessage(
       throw new Error(describeRequestError(error), { cause: error });
     }
 
-    if (!response.ok) {
-      throw new Error(`LLM error: ${serverError(body) ?? `HTTP ${response.status}`}`);
+    const apiError = serverError(body);
+    if (!response.ok || apiError !== null) {
+      const diagnostic = `LLM error (HTTP ${response.status}): ${apiError ?? "Request failed."}`;
+      throw new Error(
+        config.apiKey
+          ? diagnostic.replaceAll(config.apiKey, "[redacted]")
+          : diagnostic,
+      );
     }
 
     const content = messageContent(body);
-    if (content === null) throw new Error("LLM returned an unexpected response shape.");
+    if (content === null)
+      throw new Error("LLM returned an unexpected response shape.");
     const message = sanitizeCommitMessage(content, type);
     const error = validateCommitMessage(message, type);
     if (!error) return message;
     validationError = error;
     messages.push(
       { role: "assistant", content: message.slice(0, 200) },
-      { role: "user", content: `Invalid commit message: ${error} Return only a corrected commit message for the same changes.` },
+      {
+        role: "user",
+        content: `Invalid commit message: ${error} Return only a corrected commit message for the same changes.`,
+      },
     );
   }
-  throw new Error(`LLM returned an invalid commit message after two attempts: ${validationError}`);
+  throw new Error(
+    `LLM returned an invalid commit message after two attempts: ${validationError}`,
+  );
 }
 
 function describeRequestError(error: unknown): string {
@@ -73,19 +104,71 @@ function describeRequestError(error: unknown): string {
 }
 
 function serverError(body: unknown): string | null {
-  if (!body || typeof body !== "object" || !("error" in body)) return null;
-  const error = body.error;
-  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
-    return error.message;
+  if (!body || typeof body !== "object") return null;
+  const choice: unknown =
+    "choices" in body && Array.isArray(body.choices) ? body.choices[0] : null;
+  const error =
+    ("error" in body ? body.error : null) ??
+    (choice && typeof choice === "object" && "error" in choice
+      ? choice.error
+      : null);
+  if (!error || typeof error !== "object") return null;
+  const lines = [
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "Provider returned error",
+  ];
+  if (
+    "code" in error &&
+    (typeof error.code === "string" || typeof error.code === "number")
+  ) {
+    lines.push(`Code: ${error.code}`);
   }
-  return null;
+  const metadata = "metadata" in error ? error.metadata : null;
+  if (metadata && typeof metadata === "object") {
+    const labels: Record<string, string> = {
+      provider_name: "Provider",
+      error_type: "Type",
+      provider_code: "Provider code",
+    };
+    for (const [key, value] of Object.entries(metadata)) {
+      if (
+        Object.hasOwn(labels, key) &&
+        (typeof value === "string" || typeof value === "number")
+      ) {
+        lines.push(`${labels[key]}: ${value}`);
+      }
+    }
+    if ("raw" in metadata) {
+      let raw: unknown = metadata.raw;
+      if (typeof raw === "string") {
+        try {
+          raw = JSON.parse(raw);
+        } catch {
+          raw = metadata.raw;
+        }
+      }
+      if (typeof raw === "string") lines.push(`Details:\n${raw}`);
+      else if (raw && typeof raw === "object")
+        lines.push(`Details:\n${JSON.stringify(raw, null, 2)}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 function messageContent(body: unknown): string | null {
-  if (!body || typeof body !== "object" || !("choices" in body) || !Array.isArray(body.choices)) return null;
+  if (
+    !body ||
+    typeof body !== "object" ||
+    !("choices" in body) ||
+    !Array.isArray(body.choices)
+  )
+    return null;
   const choice: unknown = body.choices[0];
-  if (!choice || typeof choice !== "object" || !("message" in choice)) return null;
+  if (!choice || typeof choice !== "object" || !("message" in choice))
+    return null;
   const message = choice.message;
-  if (!message || typeof message !== "object" || !("content" in message)) return null;
+  if (!message || typeof message !== "object" || !("content" in message))
+    return null;
   return typeof message.content === "string" ? message.content : null;
 }
