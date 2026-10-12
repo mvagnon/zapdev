@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.0](https://github.com/mvagnon/zapdev/compare/v3.2.1...v3.3.0) (2026-10-12)
+
+
+### Features
+
+* add error management ([2bb572b](https://github.com/mvagnon/zapdev/commit/2bb572b4dd1c8fc87f24d4df26bb04ac8fd7f23e))
+
 ## [3.2.1](https://github.com/mvagnon/zapdev/compare/v3.2.0...v3.2.1) (2026-10-12)
 
 
