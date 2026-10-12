@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.1](https://github.com/mvagnon/zapdev/compare/v3.2.0...v3.2.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* show LLM error ([0587303](https://github.com/mvagnon/zapdev/commit/0587303b0e1388c7c69f8ff6468eda149378ce16))
+* **test:** content-type ([71569ae](https://github.com/mvagnon/zapdev/commit/71569aeaec0588d8b9a150d4cae383984ba88e60))
+
 ## [3.2.0](https://github.com/mvagnon/zapdev/compare/v3.1.2...v3.2.0) (2026-10-12)
 
 
