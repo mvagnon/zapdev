@@ -156,21 +156,25 @@ export const commitCommand = defineCommand({
       let type = args.type;
       if (args["ask-for-type"]) {
         if (!interactive) throw new Error("Choosing a commit type requires a terminal.");
-        const selectedType = await select({
+        const selectedType = await select<"auto" | (typeof COMMIT_TYPES)[number]>({
           message: "Commit type",
-          initialValue: COMMIT_TYPES.find((supported) => supported === type?.replace(/!$/, "")),
-          options: COMMIT_TYPES.map((value) => ({ value, label: value })),
+          initialValue: "auto",
+          options: [{ value: "auto", label: "auto" }, ...COMMIT_TYPES.map((value) => ({ value, label: value }))],
         });
         if (isCancel(selectedType)) {
           cancel("Cancelled.");
           return;
         }
-        const breaking = await confirm({ message: "Breaking change?", initialValue: false });
-        if (isCancel(breaking)) {
-          cancel("Cancelled.");
-          return;
+        if (selectedType === "auto") {
+          type = undefined;
+        } else {
+          const breaking = await confirm({ message: "Breaking change?", initialValue: false });
+          if (isCancel(breaking)) {
+            cancel("Cancelled.");
+            return;
+          }
+          type = breaking ? `${selectedType}!` : selectedType;
         }
-        type = breaking ? `${selectedType}!` : selectedType;
       }
 
       const repositories: Repository[] = repos.map((repo) => ({ repo, label: basename(repo), pendingLabel: basename(repo) }));

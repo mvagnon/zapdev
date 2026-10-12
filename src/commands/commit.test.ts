@@ -808,17 +808,25 @@ it.each(["feat", "deps", "feat!", "fix!", "refactor!", "deps!"])("passes the exp
   expect(git.commit).toHaveBeenCalledTimes(2);
 });
 
-it.each([["--ask-for-type", false], ["-T", true], ["-yT", false], ["-yTA", true]] as const)("uses the chosen type for every generation with %s (breaking=%s)", async (flag, breaking) => {
-  vi.mocked(select).mockResolvedValueOnce("feat");
+it.each([
+  ["--ask-for-type", false, "feat"], ["-T", true, "feat"],
+  ["-yT", false, "feat"], ["-yTA", true, "feat"],
+  ["--ask-for-type", false, "auto"], ["-yT", false, "auto"],
+] as const)("uses the chosen type for every generation with %s (breaking=%s, type=%s)", async (flag, breaking, selectedType) => {
+  vi.mocked(select).mockResolvedValueOnce(selectedType);
   vi.mocked(confirm).mockResolvedValue(breaking);
   vi.mocked(generateCommitMessage).mockImplementation(async (diff, _config, type) => {
-    expect(type).toBe(breaking ? "feat!" : "feat");
-    expect(confirm).toHaveBeenCalledTimes(1);
-    return `${type}: ${basename(diff)}`;
+    expect(type).toBe(selectedType === "auto" ? undefined : breaking ? "feat!" : "feat");
+    expect(confirm).toHaveBeenCalledTimes(selectedType === "auto" ? 0 : 1);
+    return `${type ?? "fix"}: ${basename(diff)}`;
   });
 
-  await runCommand(commitCommand, { rawArgs: [flag, "--no-push"] });
+  await runCommand(commitCommand, { rawArgs: [flag, "--no-push", "--type", "fix!"] });
 
+  expect(select).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    initialValue: "auto",
+  }));
+  expect(vi.mocked(select).mock.calls[0]![0].options[0]).toMatchObject({ value: "auto", label: "auto" });
   expect(generateCommitMessage).toHaveBeenCalledTimes(repos.length);
   expect(git.commit).toHaveBeenCalledTimes(repos.length);
   expect(select).toHaveBeenCalledTimes(flag.startsWith("-y") ? 1 : 2);
@@ -842,7 +850,7 @@ it.each([true, false])("honors every explicit flag with --yes regardless of its 
   expect(git.git).toHaveBeenCalledTimes(repos.length);
   expect(git.git).toHaveBeenCalledWith(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repos[0], expect.any(Function), expect.any(Function));
   expect(git.stageAll).not.toHaveBeenCalled();
-  expect(select).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: "Commit type", initialValue: "fix" }));
+  expect(select).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: "Commit type", initialValue: "auto" }));
   expect(confirm).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: "Breaking change?" }));
   expect(text).toHaveBeenCalledTimes(repos.length);
   expect(generateCommitMessage).toHaveBeenCalledWith(repos[0], config, "feat!");
