@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.0](https://github.com/mvagnon/zapdev/compare/v3.1.2...v3.2.0) (2026-10-12)
+
+
+### Features
+
+* support for API auth ([2870836](https://github.com/mvagnon/zapdev/commit/28708362a79443b423b5c9fe899be4371ee97dc4))
+
 ## [3.1.2](https://github.com/mvagnon/zapdev/compare/v3.1.1...v3.1.2) (2026-10-11)
 
 
