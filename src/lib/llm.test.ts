@@ -106,7 +106,7 @@ describe("generateCommitMessage", () => {
       ? raw
       : JSON.stringify({ error: { message: "Unsupported effort", code: "invalid_parameter" } }, null, 2);
     await expect(generateCommitMessage(diff, config)).rejects.toThrow(
-      `LLM error (HTTP ${status}): Provider returned error\nCode: 400\nProvider: Test provider\nType: invalid_request\nProvider code: invalid_parameter\nDetails:\n${details}`,
+      `LLM error (HTTP ${status}): Provider returned error\nCode: 400\nProvider: Test provider\nType: invalid_request\nProvider code: invalid_parameter\nDetails: ${details}`,
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -116,7 +116,7 @@ describe("generateCommitMessage", () => {
       error: { message: "Invalid test-secret", metadata: { raw: "Rejected Bearer test-secret" } },
     }, { status: 401 }));
     await expect(generateCommitMessage(diff, { ...config, apiKey: "test-secret" })).rejects.toThrow(
-      "LLM error (HTTP 401): Invalid [redacted]\nDetails:\nRejected Bearer [redacted]",
+      "LLM error (HTTP 401): Invalid [redacted]\nDetails: Rejected Bearer [redacted]",
     );
   });
 

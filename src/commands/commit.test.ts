@@ -8,14 +8,14 @@ vi.mock("../lib/gitleaks");
 vi.mock("../lib/llm", () => ({ generateCommitMessage: vi.fn() }));
 vi.mock("@clack/prompts", () => ({
   cancel: vi.fn(), confirm: vi.fn(), intro: vi.fn(), outro: vi.fn(),
-  select: vi.fn(), text: vi.fn(),
+  select: vi.fn(), text: vi.fn(), note: vi.fn(),
   isCancel: (value: unknown) => typeof value === "symbol",
   log: { info: vi.fn(), step: vi.fn(), warn: vi.fn(), error: vi.fn(), message: vi.fn(), success: vi.fn() },
   spinner: vi.fn(),
   taskLog: vi.fn(),
 }));
 
-import { cancel, confirm, log, outro, select, spinner, taskLog, text } from "@clack/prompts";
+import { cancel, confirm, log, note, outro, select, spinner, taskLog, text } from "@clack/prompts";
 import * as git from "../lib/git";
 import { GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
@@ -221,7 +221,7 @@ it("finishes other pulls but never stages when an upstream remote lookup fails",
   expect(git.git).toHaveBeenCalledExactlyOnceWith(["pull", "--ff-only", "--no-rebase", "--no-autostash"], repos[1], expect.any(Function), expect.any(Function));
   expect(git.stageAll).not.toHaveBeenCalled();
   expect(git.commit).not.toHaveBeenCalled();
-  expect(log.error).toHaveBeenCalledExactlyOnceWith("Pulling repositories in parallel failed: front: Cannot read upstream", { spacing: 0 });
+  expect(note).toHaveBeenCalledExactlyOnceWith("Pulling repositories in parallel failed: front: Cannot read upstream", "Error details");
   expect(process.exitCode).toBe(1);
 });
 
@@ -248,7 +248,7 @@ it.each([new Error("Diverged history"), new GitOutputError("Native Git diagnosti
   expect(generateCommitMessage).not.toHaveBeenCalled();
   expect(git.commit).not.toHaveBeenCalled();
   expect(confirm).not.toHaveBeenCalled();
-  expect(log.error).toHaveBeenCalledExactlyOnceWith(`Pulling repositories in parallel failed: front: ${error.message}`, { spacing: 0 });
+  expect(note).toHaveBeenCalledExactlyOnceWith(`Pulling repositories in parallel failed: front: ${error.message}`, "Error details");
   expect(vi.mocked(spinner).mock.results[0]!.value.stop).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);
 }, 1_000);
@@ -537,7 +537,7 @@ it("does not push from detached HEAD", async () => {
     .mockRejectedValue(new Error("HEAD is not a symbolic ref"));
   await runCommand(commitCommand, { rawArgs: ["--yes", "--push"] });
   expect(git.push).not.toHaveBeenCalled();
-  expect(log.error).toHaveBeenCalledWith("HEAD is not a symbolic ref", { spacing: 0 });
+  expect(note).toHaveBeenCalledWith("HEAD is not a symbolic ref", "Error details");
   expect(process.exitCode).toBe(1);
 });
 
@@ -611,7 +611,7 @@ it.each([undefined, new Error("non-fast-forward"), new GitOutputError("Native Gi
   const loader = vi.mocked(spinner).mock.results.at(-1)!.value;
   expect(loader.start).toHaveBeenCalledExactlyOnceWith("Pushing repositories in parallel");
   if (error) {
-    expect(log.error).toHaveBeenCalledExactlyOnceWith(`Pushing repositories in parallel failed: front (main): ${error.message}`, { spacing: 0 });
+    expect(note).toHaveBeenCalledExactlyOnceWith(`Pushing repositories in parallel failed: front (main): ${error.message}`, "Error details");
     expect(loader.stop).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   } else {
@@ -672,8 +672,9 @@ it.each(["commit", "push"])("reports captured native Git diagnostics once during
   const message = operation === "commit"
     ? "front (main): commit failed: Native Git diagnostic"
     : "Pushing repositories in parallel failed: front (main): Native Git diagnostic";
-  expect(log.error).toHaveBeenCalledExactlyOnceWith(message, { spacing: 0 });
-  const messages = [...vi.mocked(log.error).mock.calls, ...vi.mocked(log.warn).mock.calls].map(([message]) => message);
+  expect(log.error).toHaveBeenCalledExactlyOnceWith("zapdev failed.", { spacing: 0 });
+  expect(note).toHaveBeenCalledExactlyOnceWith(message, "Error details");
+  const messages = [...vi.mocked(log.error).mock.calls, ...vi.mocked(log.warn).mock.calls, ...vi.mocked(note).mock.calls].map(([message]) => message);
   expect(messages.join("\n").match(/Native Git diagnostic/g)).toHaveLength(1);
   expect(process.exitCode).toBe(1);
 });
@@ -683,7 +684,7 @@ it("reports a failed hook once without separate hook statuses", async () => {
 
   await runCommand(commitCommand, { rawArgs: ["--yes"] });
 
-  expect(log.error).toHaveBeenCalledExactlyOnceWith("front (main): commit failed: commit-msg failed (exit 3)", { spacing: 0 });
+  expect(note).toHaveBeenCalledExactlyOnceWith("front (main): commit failed: commit-msg failed (exit 3)", "Error details");
   expect(git.commit).toHaveBeenCalledTimes(1);
   expect(log.step).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);
@@ -694,7 +695,7 @@ it("still reports explicit hook timeouts in an interactive terminal", async () =
 
   await runCommand(commitCommand, { rawArgs: ["--yes"] });
 
-  expect(log.error).toHaveBeenCalledExactlyOnceWith("front (main): commit failed: pre-commit hook timed out after 60 seconds", { spacing: 0 });
+  expect(note).toHaveBeenCalledExactlyOnceWith("front (main): commit failed: pre-commit hook timed out after 60 seconds", "Error details");
   expect(process.exitCode).toBe(1);
 });
 
@@ -793,7 +794,7 @@ it.each(["", "   ", "feature/new"])("spaces steps once and keeps preparation and
 it("rejects an invalid hook timeout before preparing repositories", async () => {
   vi.stubEnv("ZD_HOOK_TIMEOUT", "invalid");
   await runCommand(commitCommand, { rawArgs: ["--yes"] });
-  expect(log.error).toHaveBeenCalledWith(expect.stringContaining("ZD_HOOK_TIMEOUT"), { spacing: 0 });
+  expect(note).toHaveBeenCalledWith(expect.stringContaining("ZD_HOOK_TIMEOUT"), "Error details");
   expect(git.findRepos).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);
 });

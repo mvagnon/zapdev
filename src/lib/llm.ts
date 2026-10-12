@@ -147,9 +147,9 @@ function serverError(body: unknown): string | null {
           raw = metadata.raw;
         }
       }
-      if (typeof raw === "string") lines.push(`Details:\n${raw}`);
+      if (typeof raw === "string") lines.push(`Details: ${raw}`);
       else if (raw && typeof raw === "object")
-        lines.push(`Details:\n${JSON.stringify(raw, null, 2)}`);
+        lines.push(`Details: ${JSON.stringify(raw, null, 2)}`);
     }
   }
   return lines.join("\n");

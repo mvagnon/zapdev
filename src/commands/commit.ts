@@ -38,6 +38,7 @@ import type { CommitType } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 import type { DiffStats } from "../types/git";
 import { runTask } from "./git-task";
+import { reportError } from "./report-error";
 
 type Repository = { repo: string; label: string; pendingLabel: string };
 type CommitDraft = Repository & { message: string; stats: DiffStats };
@@ -113,8 +114,7 @@ export const commitCommand = defineCommand({
         effort: args.effort,
       });
     } catch (error) {
-      log.error(errorMessage(error), { spacing: 0 });
-      process.exitCode = 1;
+      reportError(error);
       return;
     }
 
@@ -278,8 +278,7 @@ export const commitCommand = defineCommand({
 
       if (interactive) outro("Done.");
     } catch (error) {
-      log.error(errorMessage(error), { spacing: 0 });
-      process.exitCode = 1;
+      reportError(error);
     }
   },
 });
