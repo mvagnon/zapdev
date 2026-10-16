@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.4.0](https://github.com/mvagnon/zapdev/compare/v3.3.0...v3.4.0) (2026-10-12)
+
+
+### Features
+
+* **commit:** add auto type option and skip breaking prompt for auto ([1af66fc](https://github.com/mvagnon/zapdev/commit/1af66fcc162d8dc2f79ce20af1041fc45dd0fac2))
+* **commit:** add retry with validation feedback for invalid messages ([1ae0c0d](https://github.com/mvagnon/zapdev/commit/1ae0c0db96cb59c9e4683ac349eddc3cc1b19b9b))
+* relax the 72-character limit to a guideline and remove length validation ([f9bb71c](https://github.com/mvagnon/zapdev/commit/f9bb71ce4164e1ace6bfc2b6f61a989803c39b18))
+
 ## [3.3.0](https://github.com/mvagnon/zapdev/compare/v3.2.1...v3.3.0) (2026-10-12)
 
 
