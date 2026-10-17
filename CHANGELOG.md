@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.4.1](https://github.com/mvagnon/zapdev/compare/v3.4.0...v3.4.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* improve handling of provider errors by preserving HTTP status and details ([fd7aa2d](https://github.com/mvagnon/zapdev/commit/fd7aa2d34763966c614f10d5350baa1ee898b497))
+* **README:** update URL in documentation for Chat Completions endpoint ([2ac0dcd](https://github.com/mvagnon/zapdev/commit/2ac0dcd3473e8241dd627ad83b584c221d31afab))
+
 ## [3.4.0](https://github.com/mvagnon/zapdev/compare/v3.3.0...v3.4.0) (2026-10-12)
 
 
