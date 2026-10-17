@@ -60,9 +60,25 @@ describe("generateCommitMessage", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("reports the HTTP status when the error response is not JSON", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("Bad Gateway", { status: 502 }));
-    await expect(generateCommitMessage(diff, config)).rejects.toThrow("HTTP 502");
+  it.each([
+    ["Bad Gateway", "Bad Gateway"],
+    ["<html><body>Bad Gateway</body></html>", "<html><body>Bad Gateway</body></html>"],
+    [JSON.stringify({ detail: "Provider unavailable" }), JSON.stringify({ detail: "Provider unavailable" }, null, 2)],
+    ["", "Request failed."],
+  ])("preserves unknown error responses with their HTTP status (%s)", async (body, details) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 502 }));
+    await expect(generateCommitMessage(diff, config)).rejects.toThrow(`LLM error (HTTP 502): ${details}`);
+  });
+
+  it.each([
+    "Provider unavailable",
+    { detail: "Provider unavailable", type: "overloaded" },
+  ])("preserves unknown error payloads even with HTTP 200 (%j)", async (error) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
+      error, choices: [{ message: { content: "fix: partial output" } }],
+    }));
+    const details = typeof error === "string" ? error : JSON.stringify(error, null, 2);
+    await expect(generateCommitMessage(diff, config)).rejects.toThrow(`LLM error (HTTP 200): ${details}`);
   });
 
   it.each([
@@ -112,19 +128,24 @@ describe("generateCommitMessage", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not expose the API key echoed in provider errors", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
-      error: { message: "Invalid test-secret", metadata: { raw: "Rejected Bearer test-secret" } },
-    }, { status: 401 }));
+  it.each([
+    [JSON.stringify({ error: { message: "Invalid test-secret", metadata: { raw: "Rejected Bearer test-secret" } } }),
+      "Invalid [redacted]\nDetails: Rejected Bearer [redacted]"],
+    ["Invalid test-secret", "Invalid [redacted]"],
+    [JSON.stringify({ detail: "Invalid test-secret" }), JSON.stringify({ detail: "Invalid [redacted]" }, null, 2)],
+  ])("does not expose the API key echoed in provider errors (%s)", async (body, details) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 401 }));
     await expect(generateCommitMessage(diff, { ...config, apiKey: "test-secret" })).rejects.toThrow(
-      "LLM error (HTTP 401): Invalid [redacted]\nDetails: Rejected Bearer [redacted]",
+      `LLM error (HTTP 401): ${details}`,
     );
   });
 
   it.each([null, {}, { choices: [] }, { choices: [null] }, { choices: [{ message: { content: null } }] }])(
     "rejects malformed responses: %j", async (body) => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(body));
-      await expect(generateCommitMessage(diff, config)).rejects.toThrow("unexpected response shape");
+      await expect(generateCommitMessage(diff, config)).rejects.toThrow(
+        `LLM returned an unexpected response shape.\nDetails: ${JSON.stringify(body, null, 2)}`,
+      );
     },
   );
 

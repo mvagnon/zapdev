@@ -34,6 +34,7 @@ export async function generateCommitMessage(
     for (let attempt = 0; attempt < 2; attempt++) {
       let response: Response;
       let body: unknown;
+      let text: string;
       try {
         response = await fetch(config.url, {
           method: "POST",
@@ -57,7 +58,7 @@ export async function generateCommitMessage(
           }),
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
-        const text = await response.text();
+        text = await response.text();
         try {
           body = JSON.parse(text);
         } catch {
@@ -68,8 +69,12 @@ export async function generateCommitMessage(
       }
 
       const apiError = serverError(body);
-      if (!response.ok || apiError !== null) {
-        const diagnostic = `LLM error (HTTP ${response.status}): ${apiError ?? "Request failed."}`;
+      const content = messageContent(body);
+      if (!response.ok || apiError !== null || content === null) {
+        const fallback = body === null ? text.trim() : JSON.stringify(body, null, 2);
+        const diagnostic = !response.ok || apiError !== null
+          ? `LLM error (HTTP ${response.status}): ${apiError ?? (fallback || "Request failed.")}`
+          : `LLM returned an unexpected response shape.\nDetails: ${fallback || "Empty response."}`;
         throw new Error(
           config.apiKey
             ? diagnostic.replaceAll(config.apiKey, "[redacted]")
@@ -77,9 +82,6 @@ export async function generateCommitMessage(
         );
       }
 
-      const content = messageContent(body);
-      if (content === null)
-        throw new Error("LLM returned an unexpected response shape.");
       const message = sanitizeCommitMessage(content, type);
       const error = validateCommitMessage(message, type);
       if (!error) return message;
@@ -120,12 +122,12 @@ function serverError(body: unknown): string | null {
     (choice && typeof choice === "object" && "error" in choice
       ? choice.error
       : null);
-  if (!error || typeof error !== "object") return null;
-  const lines = [
-    "message" in error && typeof error.message === "string"
-      ? error.message
-      : "Provider returned error",
-  ];
+  if (!error) return null;
+  if (typeof error !== "object") return String(error);
+  if (!("message" in error) || typeof error.message !== "string" || !error.message.trim()) {
+    return JSON.stringify(error, null, 2);
+  }
+  const lines = [error.message];
   if (
     "code" in error &&
     (typeof error.code === "string" || typeof error.code === "number")
