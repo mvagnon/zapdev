@@ -5,7 +5,7 @@
 ---
 
 [![portfolio](https://img.shields.io/website?url=https%3A%2F%2Fmvagnon.dev&up_message=Visit&label=Portfolio&color=%23007fff)](https://mvagnon.dev)
-[![bymeacoffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-Support-yellow?logo=buymeacoffee)](https://buymeacoffee.com/mvagnon)
+[![buymeacoffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-Support-yellow?logo=buymeacoffee)](https://buymeacoffee.com/mvagnon)
 
 # zapdev
 
@@ -42,7 +42,7 @@ flowchart LR
 | `ZD_URL`          | For `commit` | Complete HTTP(S) Chat Completions endpoint, including its path                                      |
 | `ZD_MODEL`        | For `commit` | Model identifier supported by the endpoint                                                          |
 | `ZD_EFFORT`       | For `commit` | Sent as `reasoning_effort`; use a value supported by your model, such as `low`, `medium`, or `high` |
-| `ZD_API_KEY`      | No           | API key sent as `Authorization: Bearer <key>`; omit for endpoints without authentication              |
+| `ZD_API_KEY`      | No           | API key sent as `Authorization: Bearer <key>`; omit for endpoints without authentication            |
 | `ZD_HOOK_TIMEOUT` | No           | Deadline per Git hook in seconds (default: `60`); positive numbers from `0.001` to `2147483.647`    |
 
 The LLM settings have no defaults, automatic provider detection, or backup models. CLI flags override these settings. Legacy `OLLAMA_*` variables are no longer read.
@@ -122,15 +122,15 @@ From a clone:
 npm install
 ```
 
-| Command | Description |
-| ------- | ----------- |
-| `npm run zapdev` | Build and run the CLI |
-| `npm run typecheck` | Check TypeScript types |
-| `npm run lint` | Run ESLint |
-| `npm run knip` | Check unused files, exports, and dependencies |
-| `npm run test` | Run Vitest |
+| Command                | Description                                    |
+| ---------------------- | ---------------------------------------------- |
+| `npm run zapdev`       | Build and run the CLI                          |
+| `npm run typecheck`    | Check TypeScript types                         |
+| `npm run lint`         | Run ESLint                                     |
+| `npm run knip`         | Check unused files, exports, and dependencies  |
+| `npm run test`         | Run Vitest                                     |
 | `npm run staticchecks` | Run lint, typecheck, Knip, and tests, as in CI |
-| `npm run build` | Bundle to `dist/` with esbuild |
+| `npm run build`        | Bundle to `dist/` with esbuild                 |
 
 `npm link` exposes the local `zapdev` binary after `npm run build`.
 
@@ -146,18 +146,18 @@ Stages changes, scans for secrets with Gitleaks when installed, generates Conven
 - **Review:** commit all, commit one repository, edit a message, or cancel. Unselected changes remain staged.
 - **Push:** asks once, only for repositories committed during this run. Use `--push` to skip confirmation or `--no-push` to keep commits local. With `--yes`, nothing is pushed unless `--push` is explicitly set.
 
-| Flag                        | Description                                           |
-| --------------------------- | ----------------------------------------------------- |
-| `--url <url>`               | Override the Chat Completions endpoint                |
-| `--model <model>`           | Override the model                                    |
-| `--effort <effort>`         | Override the reasoning effort                         |
-| `-t, --type <type>`         | Force a commit type; append `!` for a breaking change |
-| `-T, --ask-for-type`        | Choose a type for all commits, then confirm breaking (default: no) |
-| `-p, --push`                | Push without confirmation                             |
-| `--no-push`, `--push=false` | Keep commits local without confirmation               |
-| `--pull`                    | Pull fast-forward updates before staging              |
-| `-A, --ask-for-branch`      | Ask for a branch before every commit                  |
-| `-s, --staged`              | Commit only already-staged changes                    |
+| Flag                        | Description                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------- |
+| `--url <url>`               | Override the Chat Completions endpoint                                          |
+| `--model <model>`           | Override the model                                                              |
+| `--effort <effort>`         | Override the reasoning effort                                                   |
+| `-t, --type <type>`         | Force a commit type; append `!` for a breaking change                           |
+| `-T, --ask-for-type`        | Choose a type for all commits, then confirm breaking (default: no)              |
+| `-p, --push`                | Push without confirmation                                                       |
+| `--no-push`, `--push=false` | Keep commits local without confirmation                                         |
+| `--pull`                    | Pull fast-forward updates before staging                                        |
+| `-A, --ask-for-branch`      | Ask for a branch before every commit                                            |
+| `-s, --staged`              | Commit only already-staged changes                                              |
 | `-y, --yes`                 | Skip default prompts and keep commits local; all explicit flags take precedence |
 
 ```bash
