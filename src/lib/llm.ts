@@ -2,12 +2,7 @@ import { COMMIT_DIFF_IGNORE_PATTERNS, COMMIT_SYSTEM_PROMPT } from "../prompts";
 import type { CommitType } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 import { prepareCommitContext } from "./commit-context";
-import { InvalidCommitMessageError } from "./errors";
-import {
-  applyCommitType,
-  sanitizeCommitMessage,
-  validateCommitMessage,
-} from "./commit-message";
+import { commitResponseFormat, parseCommitResponse } from "./commit-message";
 
 const REQUEST_TIMEOUT_MS = 25_000;
 
@@ -18,92 +13,61 @@ export async function generateCommitMessage(
   type?: CommitType,
 ): Promise<string> {
   const systemPrompt = type
-    ? applyCommitType(COMMIT_SYSTEM_PROMPT, type)
+    ? `${COMMIT_SYSTEM_PROMPT}\n\nThe commit type is already set to "${type}". Return only the scope and description fields, using null for no scope. Do not return a type or breaking field, or include a header prefix in the description.`
     : COMMIT_SYSTEM_PROMPT;
-  const messages: { role: "system" | "user" | "assistant"; content: string }[] =
-    [
-      { role: "system", content: systemPrompt },
-      {
-        role: "user",
-        content: prepareCommitContext(diff, COMMIT_DIFF_IGNORE_PATTERNS),
+  const messages = [
+    { role: "system", content: systemPrompt },
+    {
+      role: "user",
+      content: prepareCommitContext(diff, COMMIT_DIFF_IGNORE_PATTERNS),
+    },
+  ];
+
+  const openRouter = new URL(config.url).hostname === "openrouter.ai";
+  let response: Response;
+  let body: unknown;
+  let text: string;
+  try {
+    response = await fetch(config.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+        ...(openRouter ? {
+          "HTTP-Referer": "https://www.npmjs.com/package/zapdev",
+          "X-OpenRouter-Title": "zapdev CLI",
+        } : {}),
       },
-    ];
-
-  async function generate(): Promise<string> {
-    const rejectedResponses: string[] = [];
-    for (let attempt = 0; attempt < 2; attempt++) {
-      let response: Response;
-      let body: unknown;
-      let text: string;
-      try {
-        response = await fetch(config.url, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            ...(config.apiKey
-              ? { Authorization: `Bearer ${config.apiKey}` }
-              : {}),
-            ...(new URL(config.url).hostname === "openrouter.ai"
-              ? {
-                  "HTTP-Referer": "https://www.npmjs.com/package/zapdev",
-                  "X-OpenRouter-Title": "zapdev CLI",
-                }
-              : {}),
-          },
-          body: JSON.stringify({
-            model: config.model,
-            stream: false,
-            reasoning_effort: config.effort,
-            messages,
-          }),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-        text = await response.text();
-        try {
-          body = JSON.parse(text);
-        } catch {
-          body = null;
-        }
-      } catch (error) {
-        throw new Error(describeRequestError(error), { cause: error });
-      }
-
-      const apiError = serverError(body);
-      const content = messageContent(body);
-      if (!response.ok || apiError !== null || content === null) {
-        const fallback = body === null ? text.trim() : JSON.stringify(body, null, 2);
-        const diagnostic = !response.ok || apiError !== null
-          ? `LLM error (HTTP ${response.status}): ${apiError ?? (fallback || "Request failed.")}`
-          : `LLM returned an unexpected response shape.\nDetails: ${fallback || "Empty response."}`;
-        throw new Error(
-          config.apiKey
-            ? diagnostic.replaceAll(config.apiKey, "[redacted]")
-            : diagnostic,
-        );
-      }
-
-      const message = sanitizeCommitMessage(content, type);
-      const error = validateCommitMessage(message, type);
-      if (!error) return message;
-      rejectedResponses.push(
-        `Rejected response ${attempt + 1} (${content.length} characters): ${JSON.stringify(content)}`
-        + (content !== message ? `\nValidated message (${message.length} characters): ${JSON.stringify(message)}` : "")
-        + `\n${error}`,
-      );
-      messages.push(
-        { role: "assistant", content },
-        {
-          role: "user",
-          content: `Invalid commit message: ${error}\nMessage checked: ${JSON.stringify(message)}\nReturn only a corrected commit message for the same changes.`,
-        },
-      );
+      body: JSON.stringify({
+        model: config.model,
+        stream: false,
+        reasoning_effort: config.effort,
+        messages,
+        response_format: commitResponseFormat(type),
+        ...(openRouter ? { provider: { require_parameters: true } } : {}),
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    text = await response.text();
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = null;
     }
-    throw new InvalidCommitMessageError(
-      `LLM returned an invalid commit message after two attempts:\n${rejectedResponses.join("\n\n")}`,
-      generate,
-    );
+  } catch (error) {
+    throw new Error(describeRequestError(error), { cause: error });
   }
-  return generate();
+
+  const apiError = serverError(body);
+  const content = messageContent(body);
+  if (!response.ok || apiError !== null || content === null) {
+    const fallback = body === null ? text.trim() : JSON.stringify(body, null, 2);
+    const diagnostic = !response.ok || apiError !== null
+      ? `LLM error (HTTP ${response.status}): ${apiError ?? (fallback || "Request failed.")}`
+      : `LLM returned an unexpected response shape.\nDetails: ${fallback || "Empty response."}`;
+    throw new Error(config.apiKey ? diagnostic.replaceAll(config.apiKey, "[redacted]") : diagnostic);
+  }
+  return parseCommitResponse(content, type);
 }
 
 function describeRequestError(error: unknown): string {
@@ -177,8 +141,10 @@ function messageContent(body: unknown): string | null {
   const choice: unknown = body.choices[0];
   if (!choice || typeof choice !== "object" || !("message" in choice))
     return null;
+  if ("finish_reason" in choice && choice.finish_reason !== "stop") return null;
   const message = choice.message;
   if (!message || typeof message !== "object" || !("content" in message))
     return null;
+  if ("refusal" in message && message.refusal) return null;
   return typeof message.content === "string" ? message.content : null;
 }

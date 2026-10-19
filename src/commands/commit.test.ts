@@ -17,7 +17,7 @@ vi.mock("@clack/prompts", () => ({
 
 import { cancel, confirm, log, note, outro, select, spinner, taskLog, text } from "@clack/prompts";
 import * as git from "../lib/git";
-import { GitOutputError, InvalidCommitMessageError } from "../lib/errors";
+import { GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import { commitCommand } from "./commit";
@@ -699,9 +699,8 @@ it("still reports explicit hook timeouts in an interactive terminal", async () =
   expect(process.exitCode).toBe(1);
 });
 
-it.each(["empty", "error"])("stops before committing any repo when generation returns %s", async (failure) => {
-  if (failure === "empty") vi.mocked(generateCommitMessage).mockResolvedValueOnce("");
-  else vi.mocked(generateCommitMessage).mockRejectedValueOnce(new Error("LLM unavailable"));
+it("stops before committing any repo when generation fails", async () => {
+  vi.mocked(generateCommitMessage).mockRejectedValueOnce(new Error("LLM unavailable"));
   process.stdin.isTTY = false;
   process.stdout.isTTY = false;
   vi.mocked(git.currentBranch).mockResolvedValue("feature/current");
@@ -711,60 +710,6 @@ it.each(["empty", "error"])("stops before committing any repo when generation re
   expect(git.commit).not.toHaveBeenCalled();
   expect(select).not.toHaveBeenCalled();
   expect(git.push).not.toHaveBeenCalled();
-  expect(process.exitCode).toBe(1);
-});
-
-it("offers repeated retries with yes by default without regenerating successful repositories", async () => {
-  const retry = vi.fn<() => Promise<string>>();
-  retry.mockRejectedValueOnce(new InvalidCommitMessageError("Still invalid", retry))
-    .mockResolvedValueOnce("fix: corrected front");
-  vi.mocked(generateCommitMessage).mockRejectedValueOnce(new InvalidCommitMessageError("Invalid message", () => retry()));
-  vi.mocked(confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(true).mockResolvedValue(false);
-
-  await runCommand(commitCommand, { rawArgs: [] });
-
-  expect(vi.mocked(confirm).mock.calls.slice(0, 2)).toEqual([
-    [{ message: "front (main): retry generation?", initialValue: true }],
-    [{ message: "front (main): retry generation?", initialValue: true }],
-  ]);
-  expect(retry).toHaveBeenCalledTimes(2);
-  expect(vi.mocked(note).mock.calls).toEqual([
-    ["front (main): Invalid message", "Error details"],
-    ["front (main): Still invalid", "Error details"],
-  ]);
-  expect(log.warn).not.toHaveBeenCalled();
-  expect(generateCommitMessage).toHaveBeenCalledTimes(2);
-  expect(git.stageAll).toHaveBeenCalledTimes(2);
-  expect(scanStagedChanges).toHaveBeenCalledTimes(2);
-  expect(git.commit).toHaveBeenCalledWith(repos[0], "fix: corrected front", expect.any(Function), expect.any(Function));
-  expect(git.commit).toHaveBeenCalledWith(repos[1], "fix: back", expect.any(Function), expect.any(Function));
-  expect(process.exitCode).toBeUndefined();
-});
-
-it.each([false, Symbol("cancel")])("cancels without committing when retry is declined: %s", async (answer) => {
-  const retry = vi.fn<() => Promise<string>>();
-  vi.mocked(generateCommitMessage).mockRejectedValueOnce(new InvalidCommitMessageError("Invalid message", retry));
-  vi.mocked(confirm).mockResolvedValueOnce(answer);
-
-  await runCommand(commitCommand, { rawArgs: [] });
-
-  expect(retry).not.toHaveBeenCalled();
-  expect(git.commit).not.toHaveBeenCalled();
-  expect(git.push).not.toHaveBeenCalled();
-  expect(cancel).toHaveBeenCalledWith("Cancelled (changes left staged).");
-  expect(process.exitCode).toBeUndefined();
-});
-
-it.each(["yes", "no-terminal"])("does not automatically retry invalid generation with %s", async (mode) => {
-  const retry = vi.fn<() => Promise<string>>();
-  vi.mocked(generateCommitMessage).mockRejectedValueOnce(new InvalidCommitMessageError("Invalid message", retry));
-  if (mode === "no-terminal") process.stdin.isTTY = false;
-
-  await runCommand(commitCommand, { rawArgs: mode === "yes" ? ["--yes"] : [] });
-
-  expect(retry).not.toHaveBeenCalled();
-  expect(confirm).not.toHaveBeenCalled();
-  expect(git.commit).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);
 });
 

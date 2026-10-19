@@ -31,7 +31,7 @@ import {
   stageAll,
   switchBranch,
 } from "../lib/git";
-import { errorMessage, InvalidCommitMessageError } from "../lib/errors";
+import { errorMessage } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import type { CommitType } from "../types/commit";
@@ -190,7 +190,7 @@ export const commitCommand = defineCommand({
           if (!diff.trim()) return null;
           const stats = await getStagedDiffStats(repo);
           if (scan) await scanStagedChanges(repo, onOutput);
-          const message = await generateDraftMessage(() => generateCommitMessage(diff, config, type));
+          const message = await generateCommitMessage(diff, config, type);
           return { ...repository, message, stats };
         }));
         for (const [index, result] of results.entries()) {
@@ -204,19 +204,7 @@ export const commitCommand = defineCommand({
       for (const [index, result] of results.entries()) {
         if (result.status === "fulfilled") {
           if (result.value) {
-            let { message } = result.value;
-            while (message instanceof InvalidCommitMessageError) {
-              if (!interactive || args.yes) throw new Error(`${result.value.pendingLabel}: ${message.message}`);
-              reportError(`${result.value.pendingLabel}: ${message.message}`, false);
-              const retry = await confirm({ message: `${result.value.label}: retry generation?`, initialValue: true });
-              if (isCancel(retry) || !retry) {
-                cancel("Cancelled (changes left staged).");
-                return;
-              }
-              const generate = message.retry;
-              message = await runTask(`${result.value.label}: generating commit message`, "Generation finished", () => generateDraftMessage(generate));
-            }
-            drafts.push({ ...result.value, message });
+            drafts.push(result.value);
           } else log.info(`${repositories[index]!.pendingLabel}: nothing to commit.`, { spacing: 0 });
         }
       }
@@ -298,17 +286,6 @@ export const commitCommand = defineCommand({
     }
   },
 });
-
-async function generateDraftMessage(generate: () => Promise<string>): Promise<string | InvalidCommitMessageError> {
-  try {
-    const message = await generate();
-    if (!message) throw new Error("The model returned an empty message.");
-    return message;
-  } catch (error) {
-    if (error instanceof InvalidCommitMessageError) return error;
-    throw error;
-  }
-}
 
 async function reviewMessages(drafts: CommitDraft[], canPrompt: boolean, type?: CommitType): Promise<CommitDraft[] | null> {
   while (true) {

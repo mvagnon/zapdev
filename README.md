@@ -47,7 +47,7 @@ flowchart LR
 
 The LLM settings have no defaults, automatic provider detection, or backup models. CLI flags override these settings. Legacy `OLLAMA_*` variables are no longer read.
 
-Requests use the OpenAI Chat Completions format over plain `fetch`, without a provider SDK. Set `ZD_API_KEY` if your endpoint requires Bearer authentication; when absent or blank, no authentication header is sent. The endpoint and model must support `reasoning_effort`.
+Requests use the OpenAI Chat Completions format over plain `fetch`, without a provider SDK. Set `ZD_API_KEY` if your endpoint requires Bearer authentication; when absent or blank, no authentication header is sent. The endpoint and model must support `reasoning_effort` and **strict Structured Outputs** (`response_format.type: "json_schema"`, `strict: true`), including string `pattern` constraints. OpenAI compatibility or JSON mode alone is not sufficient. There is no plain-text fallback.
 
 ## Setup
 
@@ -55,7 +55,7 @@ Requests use the OpenAI Chat Completions format over plain `fetch`, without a pr
 
 - **Node.js >= 20 (required):** runs the CLI.
 - **Git (required):** provides the repository operations.
-- **OpenAI-compatible Chat Completions endpoint (required for `commit`):** generates Conventional Commit messages.
+- **OpenAI-compatible Chat Completions endpoint and model with strict JSON Schema Structured Outputs support (required for `commit`):** generates the fields used to assemble Conventional Commit messages locally.
 - **Gitleaks (recommended):** scans staged changes before message generation when available on `PATH`.
 
 ### Install
@@ -84,7 +84,7 @@ Choose one configuration before running `zapdev commit`. Use the complete Chat C
 
 #### Local model
 
-Start an OpenAI-compatible local server and load a model (for example, in LM Studio), then use its model identifier and supported reasoning effort:
+Start an OpenAI-compatible local server and load a model (for example, in LM Studio). Check that the server/model combination enforces strict JSON Schema structured outputs, then use its model identifier and supported reasoning effort:
 
 ```bash
 export ZD_URL="http://localhost:1234/v1/chat/completions"
@@ -98,17 +98,17 @@ No API key is needed for a server without authentication. If your local server r
 
 #### OpenRouter
 
-Create an API key at [OpenRouter](https://openrouter.ai/settings/keys) and choose an available [model ID](https://openrouter.ai/models):
+Create an API key at [OpenRouter](https://openrouter.ai/settings/keys) and choose a [model/provider supporting structured outputs](https://openrouter.ai/models?supported_parameters=structured_outputs):
 
 ```bash
 export ZD_URL="https://openrouter.ai/api/v1/chat/completions"
-export ZD_MODEL="google/gemma-4-31b-it:free"
-export ZD_EFFORT="none"
+export ZD_MODEL="your-structured-output-model-id"
+export ZD_EFFORT="low"
 export ZD_API_KEY="your-openrouter-api-key"
 zapdev commit
 ```
 
-Model availability, free-model quotas, and supported reasoning efforts depend on the model and provider. Keep your API key private.
+Model availability, quotas, supported reasoning efforts, and JSON Schema enforcement depend on the model and provider. zapdev sends `provider.require_parameters: true` to OpenRouter so requests are routed only to providers supporting the requested parameters. Keep your API key private.
 
 Requests to `openrouter.ai` automatically include `HTTP-Referer: https://www.npmjs.com/package/zapdev` and `X-OpenRouter-Title: zapdev CLI` for app attribution. These headers are not sent to local servers or other endpoints.
 
@@ -168,7 +168,9 @@ zapdev commit -syp         # commit staged changes and push without review
 zapdev commit --pull       # pull first, then follow the normal flow
 ```
 
-Supported types: `feat`, `fix`, `deps`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`. Messages should aim for 72 characters, but longer messages are accepted; the model can add `!` for breaking changes.
+Supported types: `feat`, `fix`, `deps`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`. Messages should aim for 72 characters, but longer messages are accepted.
+
+**Message generation:** in automatic mode, the model returns `type`, `scope` (or `null`), `breaking`, and `description` as structured fields; zapdev assembles `type(scope)!: description` locally. With `--type` or a manually selected type, the model returns only `scope` (or `null`) and `description`; zapdev uses the exact selected type and any explicit `!` to assemble the header. Scope is optional in both modes: `null` omits it. Selecting `auto` keeps automatic generation. There are no commit-format correction retries; refusals, incomplete responses, and endpoints that do not honor the schema stop the flow before committing.
 
 All explicit flags override `--yes`, regardless of argument order: `-T` asks for the type and breaking change, `-A` asks for branches, `--push` pushes, `--no-push` keeps commits local, `--pull` pulls first, and `--staged` commits only already-staged changes. `--type`, `--url`, `--model`, and `--effort` still apply. Unrequested prompts stay skipped; `--type` preselects the type when `-T` is set.
 
