@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.0.0](https://github.com/mvagnon/zapdev/compare/v3.4.1...v4.0.0) (2026-10-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* introduce structured outputs
+
+### Features
+
+* introduce structured outputs ([94b501d](https://github.com/mvagnon/zapdev/commit/94b501d3f37dd909235011583d23b86f8195253e))
+
+
+### Bug Fixes
+
+* Added new fields and tests for commit message generation ([fc40a52](https://github.com/mvagnon/zapdev/commit/fc40a52cb019bda1178f5b5b163499857166ab6b))
+
 ## [3.4.1](https://github.com/mvagnon/zapdev/compare/v3.4.0...v3.4.1) (2026-10-17)
 
 
