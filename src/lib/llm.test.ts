@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../prompts", () => ({
   COMMIT_SYSTEM_PROMPT: "Generate a commit message.",
+  COMMIT_TYPE_PROMPT: "Choose a type from: feat, fix. feat: adds behavior; fix: corrects behavior.",
   COMMIT_DIFF_IGNORE_PATTERNS: "package-lock.json",
 }));
 
@@ -46,7 +47,7 @@ describe("generateCommitMessage", () => {
       stream: false,
       reasoning_effort: "high",
       messages: [
-        { role: "system", content: "Generate a commit message." },
+        { role: "system", content: expect.stringContaining("Generate a commit message.") },
         { role: "user", content: 'Changed files:\n+1 -0 "src/api.ts"\n\ndiff --git a/src/api.ts b/src/api.ts\n+export function api() {}\n' },
       ],
       response_format: {
@@ -66,6 +67,10 @@ describe("generateCommitMessage", () => {
         },
       },
     });
+    const request = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(request.messages[0].content).toContain("Choose a type from: feat, fix.");
+    expect(request.messages[0].content).toContain('"type":"fix"');
+    expect(request.messages[0].content).toContain('"breaking":false');
   });
 
   it("reports API errors without retrying another model", async () => {
@@ -205,6 +210,9 @@ describe("generateCommitMessage", () => {
     });
     expect(request.messages[0].content).toContain(`The commit type is already set to "${type}"`);
     expect(request.messages[0].content).toContain("Return only the scope and description fields");
+    expect(request.messages[0].content).toContain('"description":"summarize the main change","scope":null');
+    expect(request.messages[0].content).not.toContain("Choose a type");
+    expect(request.messages[0].content).not.toContain("feat: adds behavior");
   });
 
   it.each(["fix: free text", "{", "null", "[]",
@@ -250,8 +258,8 @@ describe("generateCommitMessage", () => {
     await expect(generateCommitMessage(diff, config, "fix")).rejects.toThrow("must support strict JSON Schema structured outputs");
   });
 
-  it("preserves quotes, backticks and long descriptions without extra formatting rules", async () => {
-    const description = `handle \`code\` and "quotes" ${"x".repeat(200)}`;
+  it("preserves quotes, backticks and descriptions above the 72-character target", async () => {
+    const description = `handle \`code\` and "quotes" ${"x".repeat(100)}`;
     vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ choices: [{ message: {
       content: JSON.stringify({ scope: null, description }),
     } }] }));

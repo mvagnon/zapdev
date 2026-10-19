@@ -1,8 +1,8 @@
-import { COMMIT_DIFF_IGNORE_PATTERNS, COMMIT_SYSTEM_PROMPT } from "../prompts";
+import { COMMIT_DIFF_IGNORE_PATTERNS, COMMIT_SYSTEM_PROMPT, COMMIT_TYPE_PROMPT } from "../prompts";
 import type { CommitType } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 import { prepareCommitContext } from "./commit-context";
-import { commitResponseFormat, parseCommitResponse } from "./commit-message";
+import { buildCommitSystemPrompt, commitResponseFormat, parseCommitResponse } from "./commit-message";
 
 const REQUEST_TIMEOUT_MS = 25_000;
 
@@ -12,9 +12,7 @@ export async function generateCommitMessage(
   config: ZapdevConfig,
   type?: CommitType,
 ): Promise<string> {
-  const systemPrompt = type
-    ? `${COMMIT_SYSTEM_PROMPT}\n\nThe commit type is already set to "${type}". Return only the scope and description fields, using null for no scope. Do not return a type or breaking field, or include a header prefix in the description.`
-    : COMMIT_SYSTEM_PROMPT;
+  const systemPrompt = buildCommitSystemPrompt(COMMIT_SYSTEM_PROMPT, COMMIT_TYPE_PROMPT, type);
   const messages = [
     { role: "system", content: systemPrompt },
     {
