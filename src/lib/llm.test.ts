@@ -126,7 +126,7 @@ describe("generateCommitMessage", () => {
       "content-type": "application/json",
       Authorization: "Bearer test-key",
       ...(attributed ? {
-        "HTTP-Referer": "https://www.npmjs.com/package/zapdev",
+        "HTTP-Referer": "https://mvagnon.dev/zapdev-cli",
         "X-OpenRouter-Title": "zapdev CLI",
       } : {}),
     });

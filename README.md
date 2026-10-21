@@ -115,7 +115,7 @@ zapdev commit
 
 Model availability, quotas, supported reasoning efforts, and JSON Schema enforcement depend on the model and provider. zapdev sends `provider.require_parameters: true` to OpenRouter so requests are routed only to providers supporting the requested parameters. Keep your API key private.
 
-Requests to `openrouter.ai` automatically include `HTTP-Referer: https://www.npmjs.com/package/zapdev` and `X-OpenRouter-Title: zapdev CLI` for app attribution. These headers are not sent to local servers or other endpoints.
+Requests to `openrouter.ai` automatically include `HTTP-Referer: https://mvagnon.dev/zapdev-cli` and `X-OpenRouter-Title: zapdev CLI` for app attribution. These headers are not sent to local servers or other endpoints.
 
 Provider errors display the HTTP status and available error code, provider name, error type, and raw details; JSON details are formatted for readability. Errors returned inside HTTP 200 responses also stop the commit flow. Check [OpenRouter Activity](https://openrouter.ai/activity) for additional diagnostics.
 

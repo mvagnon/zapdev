@@ -41,7 +41,7 @@ async function generateMessage(context: string, prompt: string, config: ZapdevCo
         "content-type": "application/json",
         ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
         ...(openRouter ? {
-          "HTTP-Referer": "https://www.npmjs.com/package/zapdev",
+          "HTTP-Referer": "https://mvagnon.dev/zapdev-cli",
           "X-OpenRouter-Title": "zapdev CLI",
         } : {}),
       },
