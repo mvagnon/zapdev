@@ -13,6 +13,7 @@ vi.mock("@clack/prompts", async (importOriginal) => ({
   note: vi.fn(),
 }));
 vi.mock("./commands/commit", () => ({ commitCommand: { args: {} } }));
+vi.mock("./commands/pr", () => ({ prCommand: { args: {} } }));
 
 const argv = process.argv;
 const stdinTTY = process.stdin.isTTY;
@@ -52,7 +53,7 @@ it.each([
 
   await import("./cli");
   const command = expect.objectContaining({
-    subCommands: { commit: { args: {} } },
+    subCommands: { commit: { args: {} }, pr: { args: {} } },
   });
   if (args.includes("--help") || args.includes("--version")) {
     expect(runMain).toHaveBeenCalledExactlyOnceWith(command);

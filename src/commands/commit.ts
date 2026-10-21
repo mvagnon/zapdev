@@ -14,6 +14,7 @@ import {
 } from "@clack/prompts";
 
 import { COMMIT_TYPES } from "../config/commit-types";
+import { LLM_ARGS } from "../config/llm-args";
 import { PROTECTED_BRANCHES } from "../config/protected-branches";
 import { resolveConfig, resolveHookTimeout } from "../lib/config";
 import { validateCommitMessage } from "../lib/commit-message";
@@ -52,18 +53,7 @@ export const commitCommand = defineCommand({
       "Generate and review commit messages for the current repo or direct child repos.",
   },
   args: {
-    url: {
-      type: "string",
-      description: "Override $ZD_URL, the complete Chat Completions endpoint.",
-    },
-    model: {
-      type: "string",
-      description: "Override the model configured with $ZD_MODEL.",
-    },
-    effort: {
-      type: "string",
-      description: "Override $ZD_EFFORT, sent as reasoning_effort.",
-    },
+    ...LLM_ARGS,
     type: {
       type: "enum",
       options: COMMIT_TYPES.flatMap((type) => [type, `${type}!` as const]),

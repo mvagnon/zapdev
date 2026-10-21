@@ -1,4 +1,4 @@
-import { COMMIT_DIFF_IGNORE_PATTERNS, COMMIT_SYSTEM_PROMPT, COMMIT_TYPE_PROMPT } from "../prompts";
+import { COMMIT_DIFF_IGNORE_PATTERNS, COMMIT_SYSTEM_PROMPT, COMMIT_TYPE_PROMPT, PR_TITLE_PROMPT } from "../prompts";
 import type { CommitType } from "../types/commit";
 import type { ZapdevConfig } from "../types/config";
 import { prepareCommitContext } from "./commit-context";
@@ -12,12 +12,21 @@ export async function generateCommitMessage(
   config: ZapdevConfig,
   type?: CommitType,
 ): Promise<string> {
-  const systemPrompt = buildCommitSystemPrompt(COMMIT_SYSTEM_PROMPT, COMMIT_TYPE_PROMPT, type);
+  return generateMessage(prepareCommitContext(diff, COMMIT_DIFF_IGNORE_PATTERNS), COMMIT_SYSTEM_PROMPT, config, type);
+}
+
+/** Generate a Conventional Commit PR title from every complete branch-specific commit message. */
+export async function generatePrTitle(commits: string[], config: ZapdevConfig): Promise<string> {
+  return generateMessage(JSON.stringify(commits), PR_TITLE_PROMPT, config);
+}
+
+async function generateMessage(context: string, prompt: string, config: ZapdevConfig, type?: CommitType): Promise<string> {
+  const systemPrompt = buildCommitSystemPrompt(prompt, COMMIT_TYPE_PROMPT, type);
   const messages = [
     { role: "system", content: systemPrompt },
     {
       role: "user",
-      content: prepareCommitContext(diff, COMMIT_DIFF_IGNORE_PATTERNS),
+      content: context,
     },
   ];
 

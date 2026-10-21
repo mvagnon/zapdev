@@ -130,6 +130,13 @@ export async function currentBranch(repo: string): Promise<string> {
   return (await git(["symbolic-ref", "--short", "HEAD"], repo)).trim();
 }
 
+/** Read complete messages reachable from HEAD but not the base, oldest first. */
+export async function getBranchCommits(repo: string, base: string): Promise<string[]> {
+  await git(["merge-base", base, "HEAD"], repo);
+  const output = await git(["log", "--reverse", "--format=%B", "-z", `${base}..HEAD`, "--"], repo);
+  return output.split("\0").map((message) => message.trim()).filter(Boolean);
+}
+
 /** Switch to an existing local branch or create it from HEAD, preserving pending changes without force. */
 export async function switchBranch(repo: string, branch: string, onHook?: HookReporter, onOutput?: GitOutputReporter): Promise<void> {
   await git(["check-ref-format", "--branch", branch], repo);

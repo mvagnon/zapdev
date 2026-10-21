@@ -3,6 +3,7 @@ import { defineCommand, runCommand, runMain } from "citty";
 
 import pkg from "../package.json";
 import { commitCommand } from "./commands/commit";
+import { prCommand } from "./commands/pr";
 import { reportError } from "./commands/report-error";
 
 updateSettings({ withGuide: true });
@@ -14,7 +15,7 @@ const main = defineCommand({
     description: "Fast, precise git chores from your terminal.",
   },
   args: commitCommand.args,
-  subCommands: { commit: commitCommand },
+  subCommands: { commit: commitCommand, pr: prCommand },
   default: "commit",
 });
 
