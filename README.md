@@ -192,6 +192,7 @@ Creates a GitHub pull request for the current repository and branch.
 ```bash
 zapdev pr
 zapdev pr -b develop
+zapdev pr -y -b develop
 zapdev pr --closes https://github.com/owner/repo/issues/123
 zapdev pr -c https://trello.com/c/abc/task
 ```
@@ -200,12 +201,14 @@ zapdev pr -c https://trello.com/c/abc/task
 | ---- | ----------- |
 | `-c, --closes <url>` | Append `Closes <url>` for the PM task; optional HTTP(S) URL |
 | `-b, --branch <name>` | Target branch; defaults to the GitHub repository's default branch |
+| `-y, --yes` | Push the branch and create the PR without confirmation |
 | `--url`, `--model`, `--effort` | Override the same LLM settings as `commit` |
 
+- Requires a clean working tree, including staged, unstaged and untracked files. Otherwise, stops before fetching, generating a title or pushing, with instructions to commit or stash changes. This also applies with `--yes` and without a terminal.
 - Fetches the target branch (`--branch`, or the GitHub repository's default branch), then reads **all complete commit messages unique to the current branch** relative to that target, oldest first. Uses the upstream remote, then `origin`, then the only remote; ambiguous remotes are refused.
 - Generates a Conventional Commit-style title with the configured LLM. Commit messages are sent in full, without truncation; the model's context limit still applies.
 - Builds the description locally: bullet points grouped by commit type, bold scopes, and a separate breaking-changes section for `!`, `BREAKING CHANGE:`, or `BREAKING-CHANGE:`. Unlike a release changelog, all types are included; nonconventional subjects go under Other Changes.
-- Shows the title and description, then asks before pushing and creating the PR. Without a terminal, proceeds without confirmation. Never force-pushes or stages pending changes.
+- Shows the title and description, then asks before pushing and creating the PR. With `--yes` / `-y` or without a terminal, proceeds without confirmation. Never force-pushes or stages pending changes.
 - Targets the selected remote's repository; does not create forks. `Closes` adds a reference, not a direct PM API action; automatic task closure depends on the provider's integration.
 
 ### Zed IDE
