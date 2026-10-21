@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.0.0](https://github.com/mvagnon/zapdev/compare/v4.0.0...v5.0.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* Adds PR command to commit and create GitHub pull request
+
+### Features
+
+* Adds PR command to commit and create GitHub pull request ([f251ec6](https://github.com/mvagnon/zapdev/commit/f251ec67189f624dfd4528612b0747b64af18b70))
+* Adds rule to markdown files to disallow missing label references except for '!TIP' ([ce08552](https://github.com/mvagnon/zapdev/commit/ce08552781798a8dd9c54e57f0b8d8b04ae13bfa))
+
+
+### Bug Fixes
+
+* Added test for pr command ([8fff2d9](https://github.com/mvagnon/zapdev/commit/8fff2d9e1b648a52a549a13e0ee7a5b50897b6ba))
+* Updated README with tip on using zapdev-mcp ([fe57c5e](https://github.com/mvagnon/zapdev/commit/fe57c5e6ded7f45ade58dba14dfecc6bb7355edb))
+
 ## [4.0.0](https://github.com/mvagnon/zapdev/compare/v3.4.1...v4.0.0) (2026-10-19)
 
 
