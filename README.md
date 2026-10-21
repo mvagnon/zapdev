@@ -9,6 +9,10 @@
 
 # zapdev
 
+> [!TIP]
+> **Working with an AI assistant?** Use **[zapdev-mcp](https://github.com/mvagnon/zapdev-mcp)**
+> to expose repository, commit, and pull request tools directly to your MCP client.
+
 ## Project Introduction
 
 **zapdev** is a lightweight TypeScript CLI that makes small, repetitive Git chores fast and precise.
