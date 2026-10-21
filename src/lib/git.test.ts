@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { x } from "tinyexec";
 
-import { commit, currentBranch, findRepos, getPushRemote, getUpstreamRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, push, stageAll, switchBranch } from "./git";
+import { commit, currentBranch, findRepos, getBranchCommits, getPushRemote, getUpstreamRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, push, stageAll, switchBranch } from "./git";
 import type { HookEvent } from "../types/git";
 import { prepareCommitContext } from "./commit-context";
 
@@ -143,6 +143,24 @@ async function configureHooks(): Promise<string> {
   await mkdir(hooks);
   return hooks;
 }
+
+it("reads only branch-specific commits, oldest first, including complete bodies after merging the base", async () => {
+  await configureHooks();
+  await commit(root, "chore: initial");
+  await git(["branch", "base"], root);
+  await switchBranch(root, "feature/pr");
+  await git(["commit", "--allow-empty", "-m", "feat: search", "-m", "Search details."], root);
+  await switchBranch(root, "base");
+  await git(["commit", "--allow-empty", "-m", "fix: base only"], root);
+  await switchBranch(root, "feature/pr");
+  await git(["merge", "--no-ff", "base", "-m", "chore: merge base"], root);
+  await git(["commit", "--allow-empty", "-m", "fix: empty search"], root);
+
+  await expect(getBranchCommits(root, "base")).resolves.toEqual([
+    "feat: search\n\nSearch details.", "chore: merge base", "fix: empty search",
+  ]);
+  await expect(getBranchCommits(root, "HEAD")).resolves.toEqual([]);
+});
 
 it("creates or switches local branches while preserving staged changes and the original branch", async () => {
   await configureHooks();

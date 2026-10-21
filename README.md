@@ -9,6 +9,10 @@
 
 # zapdev
 
+> [!TIP]
+> **Working with an AI assistant?** Use **[zapdev-mcp](https://github.com/mvagnon/zapdev-mcp)**
+> to expose repository, commit, and pull request tools directly to your MCP client.
+
 ## Project Introduction
 
 **zapdev** is a lightweight TypeScript CLI that makes small, repetitive Git chores fast and precise.
@@ -39,9 +43,9 @@ flowchart LR
 
 | Variable          | Required     | Description                                                                                         |
 | ----------------- | ------------ | --------------------------------------------------------------------------------------------------- |
-| `ZD_URL`          | For `commit` | Complete HTTP(S) Chat Completions endpoint, including its path                                      |
-| `ZD_MODEL`        | For `commit` | Model identifier supported by the endpoint                                                          |
-| `ZD_EFFORT`       | For `commit` | Sent as `reasoning_effort`; use a value supported by your model, such as `low`, `medium`, or `high` |
+| `ZD_URL`          | For `commit` / `pr` | Complete HTTP(S) Chat Completions endpoint, including its path                                      |
+| `ZD_MODEL`        | For `commit` / `pr` | Model identifier supported by the endpoint                                                          |
+| `ZD_EFFORT`       | For `commit` / `pr` | Sent as `reasoning_effort`; use a value supported by your model, such as `low`, `medium`, or `high` |
 | `ZD_API_KEY`      | No           | API key sent as `Authorization: Bearer <key>`; omit for endpoints without authentication            |
 | `ZD_HOOK_TIMEOUT` | No           | Deadline per Git hook in seconds (default: `60`); positive numbers from `0.001` to `2147483.647`    |
 
@@ -55,7 +59,8 @@ Requests use the OpenAI Chat Completions format over plain `fetch`, without a pr
 
 - **Node.js >= 20 (required):** runs the CLI.
 - **Git (required):** provides the repository operations.
-- **OpenAI-compatible Chat Completions endpoint and model with strict JSON Schema Structured Outputs support (required for `commit`):** generates the fields used to assemble Conventional Commit messages locally.
+- **OpenAI-compatible Chat Completions endpoint and model with strict JSON Schema Structured Outputs support (required for `commit` and `pr`):** generates commit messages and PR titles.
+- **GitHub CLI (`gh`, required for `pr`):** install it and authenticate with `gh auth login`.
 - **Gitleaks (recommended):** scans staged changes before message generation when available on `PATH`.
 
 ### Install
@@ -183,6 +188,32 @@ All explicit flags override `--yes`, regardless of argument order: `-T` asks for
 **Git:** `--pull` only pulls repositories with changes to commit and a configured upstream, without rebase or automatic stash. Push uses the current branch's name and its upstream remote, then `origin`, then the only remote; ambiguous or missing remotes are skipped. No force-push. Errors stop the flow without undoing earlier pulls or commits; cancelling branch selection also stops all pushes.
 
 **Without a terminal:** review is skipped, explicit `-T` / `-A` prompts are refused even with `--yes` (`--branch` bypasses `-A`), and protected branches require `--yes` or `--branch` to commit without a branch prompt. Commits stay local unless `--push` is set. Git hooks have a 60-second timeout (`ZD_HOOK_TIMEOUT` to override); interactive hooks must use `/dev/tty`.
+
+### `zapdev pr`
+
+Creates a GitHub pull request for the current repository and branch.
+
+```bash
+zapdev pr
+zapdev pr -b develop
+zapdev pr -y -b develop
+zapdev pr --closes https://github.com/owner/repo/issues/123
+zapdev pr -c https://trello.com/c/abc/task
+```
+
+| Flag | Description |
+| ---- | ----------- |
+| `-c, --closes <url>` | Append `Closes <url>` for the PM task; optional HTTP(S) URL |
+| `-b, --branch <name>` | Target branch; defaults to the GitHub repository's default branch |
+| `-y, --yes` | Push the branch and create the PR without confirmation |
+| `--url`, `--model`, `--effort` | Override the same LLM settings as `commit` |
+
+- Requires a clean working tree, including staged, unstaged and untracked files. Otherwise, stops before fetching, generating a title or pushing, with instructions to commit or stash changes. This also applies with `--yes` and without a terminal.
+- Fetches the target branch (`--branch`, or the GitHub repository's default branch), then reads **all complete commit messages unique to the current branch** relative to that target, oldest first. Uses the upstream remote, then `origin`, then the only remote; ambiguous remotes are refused.
+- Generates a Conventional Commit-style title with the configured LLM. Commit messages are sent in full, without truncation; the model's context limit still applies.
+- Builds the description locally: bullet points grouped by commit type, bold scopes, and a separate breaking-changes section for `!`, `BREAKING CHANGE:`, or `BREAKING-CHANGE:`. Unlike a release changelog, all types are included; nonconventional subjects go under Other Changes.
+- Shows the title and description, then asks before pushing and creating the PR. With `--yes` / `-y` or without a terminal, proceeds without confirmation. Never force-pushes or stages pending changes.
+- Targets the selected remote's repository; does not create forks. `Closes` adds a reference, not a direct PM API action; automatic task closure depends on the provider's integration.
 
 ### Zed IDE
 

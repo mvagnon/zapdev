@@ -4,11 +4,12 @@ vi.mock("../prompts", () => ({
   COMMIT_SYSTEM_PROMPT: "Generate a commit message.",
   COMMIT_TYPE_PROMPT: "Choose a type from: feat, fix. feat: adds behavior; fix: corrects behavior.",
   COMMIT_DIFF_IGNORE_PATTERNS: "package-lock.json",
+  PR_TITLE_PROMPT: "Generate a pull request title from all branch commits.",
 }));
 
 import type { ZapdevConfig } from "../types/config";
 import { resolveConfig } from "./config";
-import { generateCommitMessage } from "./llm";
+import { generateCommitMessage, generatePrTitle } from "./llm";
 
 const config: ZapdevConfig = {
   url: "http://localhost:1234/v1/chat/completions",
@@ -20,6 +21,17 @@ const diff = "1\t0\tsrc/api.ts\0\0diff --git a/src/api.ts b/src/api.ts\n+export 
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+it("generates a PR title from all complete commit messages without diff filtering or truncation", async () => {
+  const commits = ["feat: add search\n\nSearch details.", `fix: handle empty queries\n\n${"x".repeat(13_000)}`];
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ choices: [{ message: {
+    content: JSON.stringify({ type: "feat", scope: null, breaking: false, description: "add search" }),
+  } }] }));
+  await expect(generatePrTitle(commits, config)).resolves.toBe("feat: add search");
+  const request = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+  expect(request.messages[0].content).toContain("Generate a pull request title");
+  expect(request.messages[1]).toEqual({ role: "user", content: JSON.stringify(commits) });
 });
 
 describe("generateCommitMessage", () => {
