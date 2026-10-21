@@ -86,6 +86,10 @@ export const commitCommand = defineCommand({
       type: "boolean",
       description: "Pull fast-forward updates before staging or generating commit messages.",
     },
+    branch: {
+      type: "string",
+      description: "Commit to this local branch in every repository without asking; create it if needed.",
+    },
     "ask-for-branch": {
       type: "boolean",
       alias: "A",
@@ -219,9 +223,9 @@ export const commitCommand = defineCommand({
       let previousBranchInput = "";
       for (const draft of selected) {
         let withGuide = true;
-        let targetBranch: string | undefined;
+        let targetBranch = args.branch;
         const current = await currentBranch(draft.repo);
-        if (args["ask-for-branch"] || (!args.yes && PROTECTED_BRANCHES.includes(current))) {
+        if (targetBranch === undefined && (args["ask-for-branch"] || (!args.yes && PROTECTED_BRANCHES.includes(current)))) {
           if (!interactive) throw new Error("Choosing a branch before committing requires a terminal. Changes remain staged.");
           const answer = await text({
             message: `${basename(draft.repo)} (${current}): branch to commit to`,
@@ -233,15 +237,15 @@ export const commitCommand = defineCommand({
           }
           previousBranchInput = answer.trim();
           withGuide = Boolean(previousBranchInput);
-          const branch = previousBranchInput || current;
-          if (branch !== current) {
-            targetBranch = branch;
-            draft.label = `${basename(draft.repo)} (${branch})`;
-            draft.pendingLabel = styleText("bold", draft.label);
-          }
+          targetBranch = previousBranchInput || current;
+        }
+        if (targetBranch === current) targetBranch = undefined;
+        if (targetBranch !== undefined) {
+          draft.label = `${basename(draft.repo)} (${targetBranch})`;
+          draft.pendingLabel = styleText("bold", draft.label);
         }
         await runTask(`${draft.label}: commit`, `${draft.label}: committed ${draft.message}`, async (onOutput, onHook) => {
-          if (targetBranch) await switchBranch(draft.repo, targetBranch, onHook, onOutput);
+          if (targetBranch !== undefined) await switchBranch(draft.repo, targetBranch, onHook, onOutput);
           await gitCommit(draft.repo, draft.message, onHook, onOutput);
         }, withGuide);
         toSend.push(draft);

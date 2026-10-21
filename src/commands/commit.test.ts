@@ -329,6 +329,40 @@ it.each([undefined, "--ask-for-branch", "-A", "-yA"])("refuses commits requiring
   expect(process.exitCode).toBe(1);
 });
 
+it.each([
+  [true, ["--branch=feature/shared"]],
+  [true, ["--yes", "-A", "--branch=feature/shared", "--push"]],
+  [false, ["-A", "--branch", "feature/shared", "--push"]],
+  [false, ["--branch=feature/shared", "--yes"]],
+] as const)("uses the explicit branch in every repository without a branch prompt (TTY=%s, args=%j)", async (interactive, rawArgs) => {
+  process.stdin.isTTY = interactive;
+  process.stdout.isTTY = interactive;
+
+  await runCommand(commitCommand, { rawArgs: [...rawArgs] });
+
+  expect(text).not.toHaveBeenCalled();
+  expect(git.switchBranch).toHaveBeenCalledTimes(repos.length);
+  expect(git.commit).toHaveBeenCalledTimes(repos.length);
+  for (const [index, repo] of repos.entries()) {
+    expect(git.switchBranch).toHaveBeenNthCalledWith(index + 1, repo, "feature/shared", expect.any(Function), expect.any(Function));
+    expect(vi.mocked(git.switchBranch).mock.invocationCallOrder[index]).toBeLessThan(vi.mocked(git.commit).mock.invocationCallOrder[index]!);
+  }
+  expect(select).toHaveBeenCalledTimes(interactive && !rawArgs.some((arg) => arg === "--yes") ? 1 : 0);
+  expect(confirm).toHaveBeenCalledTimes(rawArgs.length === 1 ? 1 : 0);
+  expect(git.push).toHaveBeenCalledTimes(rawArgs.some((arg) => arg === "--push") ? repos.length : 0);
+  for (const args of vi.mocked(git.push).mock.calls) expect(args[2]).toBe("feature/shared");
+  expect(process.exitCode).toBeUndefined();
+});
+
+it("keeps the requested current branch without switching or prompting", async () => {
+  await runCommand(commitCommand, { rawArgs: ["--yes", "-A", "--branch=main"] });
+
+  expect(git.switchBranch).not.toHaveBeenCalled();
+  expect(text).not.toHaveBeenCalled();
+  expect(git.commit).toHaveBeenCalledTimes(repos.length);
+  expect(process.exitCode).toBeUndefined();
+});
+
 it.each(["--ask-for-branch", "-A", "-yA"])("asks for a branch in every selected repository with %s and --push", async (flag) => {
   const branches = new Map([[repos[0]!, "feature/front"], [repos[1]!, "fix/api"]]);
   vi.mocked(git.currentBranch).mockImplementation(async (repo) => branches.get(repo)!);
@@ -640,10 +674,10 @@ it("keeps earlier commits local when the next branch input is cancelled", async 
   expect(process.exitCode).toBeUndefined();
 });
 
-it("stops all remaining commits and pushes when a branch switch fails", async () => {
+it.each([undefined, "feature/shared", ""])("stops all remaining commits and pushes when a branch switch fails (branch=%j)", async (branch) => {
   vi.mocked(text).mockResolvedValue("feature/shared");
   vi.mocked(git.switchBranch).mockRejectedValueOnce(new Error("Local changes would be overwritten"));
-  await runCommand(commitCommand, { rawArgs: ["-p"] });
+  await runCommand(commitCommand, { rawArgs: ["-p", ...(branch === undefined ? [] : [`--branch=${branch}`])] });
   expect(git.commit).not.toHaveBeenCalled();
   expect(git.push).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);
