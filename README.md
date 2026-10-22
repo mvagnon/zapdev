@@ -191,7 +191,7 @@ All explicit flags override `--yes`, regardless of argument order: `-T` asks for
 
 ### `zapdev pr`
 
-Creates a GitHub pull request for the current repository and branch.
+Creates a GitHub pull request for the current repository and branch. Outside a Git repository, detects direct child repositories, like `commit`.
 
 ```bash
 zapdev pr
@@ -205,7 +205,7 @@ zapdev pr -c https://trello.com/c/abc/task
 | ---- | ----------- |
 | `-c, --closes <url>` | Append `Closes <url>` for the PM task; optional HTTP(S) URL |
 | `-b, --branch <name>` | Target branch; defaults to the GitHub repository's default branch |
-| `-y, --yes` | Push the branch and create the PR without confirmation |
+| `-y, --yes` | Push branches and create all PRs without confirmation |
 | `--url`, `--model`, `--effort` | Override the same LLM settings as `commit` |
 
 - Requires a clean working tree, including staged, unstaged and untracked files. Otherwise, stops before fetching, generating a title or pushing, with instructions to commit or stash changes. This also applies with `--yes` and without a terminal.
@@ -213,6 +213,7 @@ zapdev pr -c https://trello.com/c/abc/task
 - Generates a Conventional Commit-style title with the configured LLM. Commit messages are sent in full, without truncation; the model's context limit still applies.
 - Builds the description locally: bullet points grouped by commit type, bold scopes, and a separate breaking-changes section for `!`, `BREAKING CHANGE:`, or `BREAKING-CHANGE:`. Unlike a release changelog, all types are included; nonconventional subjects go under Other Changes.
 - Shows the title and description, then asks before pushing and creating the PR. With `--yes` / `-y` or without a terminal, proceeds without confirmation. Never force-pushes or stages pending changes.
+- With multiple repositories, prepares PRs in parallel and lets you create all PRs or just one. Every repository must have a clean working tree and a valid PR context; preparation failures stop the command before any push or PR creation. `--branch` and `--closes` apply to every PR.
 - Targets the selected remote's repository; does not create forks. `Closes` adds a reference, not a direct PM API action; automatic task closure depends on the provider's integration.
 
 ### Zed IDE
