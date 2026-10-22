@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.1.0](https://github.com/mvagnon/zapdev/compare/v5.0.0...v5.1.0) (2026-10-22)
+
+
+### Features
+
+* **pr:** Publish PRs for the current repo or direct child repos using AI titles. ([ccae261](https://github.com/mvagnon/zapdev/commit/ccae2612823a5e58b70595e3ba8788578ecae887))
+
 ## [5.0.0](https://github.com/mvagnon/zapdev/compare/v4.0.0...v5.0.0) (2026-10-21)
 
 
