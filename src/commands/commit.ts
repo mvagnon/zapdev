@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { styleText } from "node:util";
 
 import { defineCommand } from "citty";
@@ -16,6 +16,7 @@ import {
 import { COMMIT_TYPES } from "../config/commit-types";
 import { LLM_ARGS } from "../config/llm-args";
 import { PROTECTED_BRANCHES } from "../config/protected-branches";
+import { REPOSITORY_ARGS } from "../config/repository-args";
 import { resolveConfig, resolveHookTimeout } from "../lib/config";
 import { validateCommitMessage } from "../lib/commit-message";
 import {
@@ -53,6 +54,7 @@ export const commitCommand = defineCommand({
       "Generate and review commit messages for the current repo or direct child repos.",
   },
   args: {
+    ...REPOSITORY_ARGS,
     ...LLM_ARGS,
     type: {
       type: "enum",
@@ -115,7 +117,7 @@ export const commitCommand = defineCommand({
     if (interactive) intro("zapdev commit");
 
     try {
-      const repos = await findRepos(process.cwd());
+      const repos = await findRepos(resolve(args.path));
       if (repos.length === 0) {
         log.warn("No git repository found here or in direct children.");
         if (interactive) outro("Nothing to do.");

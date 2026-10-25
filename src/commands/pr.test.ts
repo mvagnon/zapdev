@@ -1,3 +1,7 @@
+import { access, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+
 import { confirm, log, select } from "@clack/prompts";
 import { runCommand } from "citty";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -25,6 +29,7 @@ const stdinTTY = process.stdin.isTTY;
 const stdoutTTY = process.stdout.isTTY;
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.resetAllMocks();
   vi.unstubAllEnvs();
   process.stdin.isTTY = stdinTTY;
@@ -179,4 +184,131 @@ it("checks all selected branches before pushing any repository", async () => {
   expect(reportError).toHaveBeenCalledWith(new Error("back: The branch changed during review. Run zapdev pr again."));
   expect(push).not.toHaveBeenCalled();
   expect(github).not.toHaveBeenCalled();
+});
+
+it.each([undefined, "../other repo", "/absolute/repo"])("discovers repositories from the optional path without cleanup: %s", async (path) => {
+  const cwd = process.cwd();
+
+  await runCommand(prCommand, { rawArgs: [...(path ? [path] : []), "--yes"] });
+
+  expect(findRepos).toHaveBeenCalledExactlyOnceWith(resolve(path ?? cwd));
+  expect(git).not.toHaveBeenCalledWith(["worktree", "list", "--porcelain", "-z"], expect.any(String));
+  expect(push).toHaveBeenCalledTimes(1);
+  expect(process.cwd()).toBe(cwd);
+});
+
+it.each(["", "src"])("refuses cleanup from a targeted worktree or its subdirectory before any push: %s", async (subdir) => {
+  const cwd = await realpath(process.cwd());
+  const path = subdir ? dirname(cwd) : cwd;
+  vi.mocked(git).mockImplementation(async (args) => args[0] === "worktree"
+    ? `worktree ${dirname(path)}\0HEAD base-sha\0branch refs/heads/main\0\0worktree ${path}\0HEAD head-sha\0branch refs/heads/feature/pr\0\0`
+    : "head-sha");
+
+  await runCommand(prCommand, { rawArgs: ["--yes", "--cleanup-worktrees"] });
+
+  expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("outside") }));
+  expect(push).not.toHaveBeenCalled();
+  expect(github).not.toHaveBeenCalled();
+});
+
+it("checks cleanup safety in every selected repository before pushing any of them", async () => {
+  const cwd = await realpath(process.cwd());
+  vi.mocked(findRepos).mockResolvedValue(["/repos/front", "/repos/back"]);
+  vi.mocked(git).mockImplementation(async (args, repo) => {
+    if (args[0] !== "worktree") return "head-sha";
+    return `worktree ${dirname(cwd)}\0HEAD base-sha\0branch refs/heads/main\0\0worktree ${repo.endsWith("back") ? cwd : join(cwd, "src")}\0HEAD head-sha\0branch refs/heads/feature/pr\0\0`;
+  });
+
+  await runCommand(prCommand, { rawArgs: ["--yes", "--cleanup-worktrees"] });
+
+  expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("back:") }));
+  expect(push).not.toHaveBeenCalled();
+  expect(github).not.toHaveBeenCalled();
+});
+
+it.each([false, true])("only removes matching linked worktrees after successful PR creation (creation fails=%s)", async (fails) => {
+  const main = await realpath(process.cwd());
+  const path = join(main, "src");
+  const other = join(main, "src", "types");
+  const detached = join(main, "src", "lib");
+  const listing = `worktree ${main}\0HEAD head-sha\0branch refs/heads/feature/pr\0\0worktree ${path}\0HEAD head-sha\0branch refs/heads/feature/pr\0\0worktree ${other}\0HEAD other-sha\0branch refs/heads/feature/pr-other\0\0worktree ${detached}\0HEAD head-sha\0detached\0\0`;
+  vi.mocked(findRepos).mockResolvedValue([path]);
+  vi.mocked(git).mockImplementation(async (args) => {
+    if (args[0] === "worktree" && args[1] === "list") return listing;
+    if (args[0] === "worktree" && args[1] === "remove") {
+      expect(github).toHaveBeenCalledTimes(1);
+      return "";
+    }
+    return "head-sha";
+  });
+  if (fails) vi.mocked(github).mockRejectedValueOnce(new Error("PR creation failed"));
+
+  await runCommand(prCommand, { rawArgs: ["--yes", "--cleanup-worktrees"] });
+
+  const removals = vi.mocked(git).mock.calls.filter(([args]) => args[0] === "worktree" && args[1] === "remove");
+  expect(removals).toEqual(fails ? [] : [[["worktree", "remove", "--", path], main]]);
+  if (!fails) expect(reportError).not.toHaveBeenCalled();
+});
+
+it("preserves locked, missing, changed and dirty worktrees, continuing cleanup without force", async () => {
+  const main = await realpath(process.cwd());
+  const paths = ["src", "src/lib", "src/types", "src/config", "src/prompts"].map((path) => join(main, path));
+  const listing = (changed: boolean): string => `worktree ${main}\0HEAD base-sha\0branch refs/heads/main\0\0${paths.map((path, index) =>
+    `worktree ${path}\0HEAD ${changed && index === 2 ? "new-sha" : "head-sha"}\0branch refs/heads/feature/pr\0${index === 0 ? "locked reason\0" : index === 1 ? "prunable missing\0" : ""}\0`).join("")}`;
+  let lists = 0;
+  vi.mocked(git).mockImplementation(async (args) => {
+    if (args[0] === "worktree" && args[1] === "list") return listing(lists++ > 0);
+    if (args[0] === "worktree" && args[1] === "remove" && args.at(-1) === paths[3]) throw new Error("contains modified or untracked files");
+    return "head-sha";
+  });
+
+  await runCommand(prCommand, { rawArgs: ["--yes", "--cleanup-worktrees"] });
+
+  const removals = vi.mocked(git).mock.calls.filter(([args]) => args[0] === "worktree" && args[1] === "remove");
+  expect(removals).toEqual(paths.slice(3).map((path) => [["worktree", "remove", "--", path], main]));
+  expect(log.warn).toHaveBeenCalledTimes(4);
+  expect(reportError).not.toHaveBeenCalled();
+});
+
+it.each([false, true])("cleans real worktree directories safely and detects cwd through a symlink (inside=%s)", async (inside) => {
+  const actual = await vi.importActual<typeof import("../lib/git")>("../lib/git");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "zapdev-worktrees-")));
+  try {
+    const main = join(root, "main");
+    const clean = join(root, "clean space\nworktree");
+    const second = join(root, "second");
+    const dirty = join(root, "dirty");
+    const locked = join(root, "locked");
+    await actual.git(["init", "--quiet", "-b", "main", main], root);
+    await actual.git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "initial"], main);
+    await actual.git(["worktree", "add", "-b", "feature/pr", clean], main);
+    for (const path of [second, dirty, locked]) await actual.git(["worktree", "add", "--force", path, "feature/pr"], main);
+    await actual.git(["worktree", "lock", locked], main);
+    await writeFile(join(dirty, "untracked.txt"), "keep me");
+    await mkdir(join(clean, "nested"));
+    await symlink(clean, join(root, "alias"));
+    const head = (await actual.git(["rev-parse", "HEAD"], clean)).trim();
+    vi.mocked(getPrContext).mockResolvedValue({ branch: "feature/pr", base: "main", remote: "origin", repository: "owner/repo", head, commits: ["feat: search"] });
+    vi.mocked(findRepos).mockResolvedValue([clean]);
+    vi.mocked(git).mockImplementation((args, repo) => actual.git(args, repo));
+    if (inside) vi.spyOn(process, "cwd").mockReturnValue(join(root, "alias", "nested"));
+
+    await runCommand(prCommand, { rawArgs: [clean, "--yes", "--cleanup-worktrees"] });
+
+    if (inside) {
+      expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("outside") }));
+      expect(push).not.toHaveBeenCalled();
+      await expect(access(clean)).resolves.toBeUndefined();
+    } else {
+      await expect(access(clean)).rejects.toThrow();
+      await expect(access(second)).rejects.toThrow();
+      expect(log.warn).toHaveBeenCalledTimes(2);
+      expect(reportError).not.toHaveBeenCalled();
+    }
+    for (const path of [main, dirty, locked]) await expect(access(path)).resolves.toBeUndefined();
+    expect((await actual.git(["show-ref", "--verify", "refs/heads/feature/pr"], main)).trim()).toContain(head);
+  } finally {
+    vi.restoreAllMocks();
+    await rm(root, { recursive: true, force: true });
+  }
 });

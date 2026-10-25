@@ -1,15 +1,17 @@
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 
 import { cancel, confirm, intro, isCancel, log, note, outro, select } from "@clack/prompts";
 import { defineCommand } from "citty";
 
 import { LLM_ARGS } from "../config/llm-args";
+import { REPOSITORY_ARGS } from "../config/repository-args";
 import { resolveConfig, resolveHookTimeout } from "../lib/config";
 import { errorMessage } from "../lib/errors";
 import { currentBranch, findRepos, getRepoStatus, git, push } from "../lib/git";
 import { getPrContext, github } from "../lib/github";
 import { generatePrTitle } from "../lib/llm";
 import { buildPrDescription, validateClosesUrl } from "../lib/pr";
+import { cleanupWorktrees, prepareWorktreeCleanup } from "../lib/worktrees";
 import { runTask } from "./git-task";
 import { reportError } from "./report-error";
 
@@ -17,10 +19,12 @@ import { reportError } from "./report-error";
 export const prCommand = defineCommand({
   meta: { name: "pr", description: "Create GitHub PRs for the current repo or direct child repos with AI titles and Conventional Commit descriptions." },
   args: {
+    ...REPOSITORY_ARGS,
     ...LLM_ARGS,
     closes: { type: "string", alias: "c", description: "URL of the PM task closed by this PR." },
     branch: { type: "string", alias: "b", description: "Target branch of the PR; defaults to the repository's default branch." },
     yes: { type: "boolean", alias: "y", description: "Push branches and create all PRs without confirmation." },
+    "cleanup-worktrees": { type: "boolean", description: "After PR creation, remove the source branch's linked worktree directories without force; run from outside them." },
   },
   async run({ args }) {
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -29,7 +33,7 @@ export const prCommand = defineCommand({
       const config = resolveConfig(process.env, args);
       resolveHookTimeout();
       if (interactive) intro("zapdev pr");
-      const repos = await findRepos(process.cwd());
+      const repos = await findRepos(resolve(args.path));
       if (repos.length === 0) {
         log.warn("No git repository found here or in direct children.");
         if (interactive) outro("Nothing to do.");
@@ -82,12 +86,15 @@ export const prCommand = defineCommand({
         }
         if (typeof answer === "string" && answer !== "all") selected = results.filter(({ repo }) => repo === answer);
       }
-      await Promise.all(selected.map(({ repo, context }) => inRepository(repo, async () => {
+      const publications = await Promise.all(selected.map((result) => inRepository(result.repo, async () => {
+        const { repo, context } = result;
         if (await currentBranch(repo) !== context.branch || (await git(["rev-parse", "HEAD"], repo)).trim() !== context.head) {
           throw new Error("The branch changed during review. Run zapdev pr again.");
         }
+        const cleanup = args["cleanup-worktrees"] ? await prepareWorktreeCleanup(repo, context.branch) : undefined;
+        return { ...result, cleanup };
       })));
-      for (const { repo, context, title, body } of selected) {
+      for (const { repo, context, title, body } of publications) {
         await inRepository(repo, async () => {
           await runTask("Pushing branch", "Branch pushed", (onOutput, onHook) =>
             push(repo, context.remote, context.branch, onHook, onOutput));
@@ -96,6 +103,13 @@ export const prCommand = defineCommand({
             "--head", context.branch, "--title", title, "--body", body,
           ], repo));
           outro(url);
+        });
+      }
+      for (const { repo, context, cleanup } of publications) {
+        if (!cleanup?.paths.length) continue;
+        await inRepository(repo, async () => {
+          const warnings = await runTask("Cleaning up worktrees", "Worktree cleanup finished", () => cleanupWorktrees(cleanup, context.head));
+          for (const warning of warnings) log.warn(warning);
         });
       }
     } catch (error) {

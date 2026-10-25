@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { WriteStream } from "node:tty";
 import { runCommand } from "citty";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -90,6 +90,17 @@ it("generates all messages concurrently before committing any repository", async
   expect(git.push).not.toHaveBeenCalled();
   expect(git.git).not.toHaveBeenCalled();
 }, 1_000);
+
+it.each([undefined, "../other repo", "/absolute/repo"])("discovers repositories from the optional path without changing cwd: %s", async (path) => {
+  const cwd = process.cwd();
+
+  await runCommand(commitCommand, { rawArgs: [...(path ? [path] : []), "--yes", "--staged"] });
+
+  expect(git.findRepos).toHaveBeenCalledExactlyOnceWith(resolve(path ?? cwd));
+  expect(git.stageAll).not.toHaveBeenCalled();
+  expect(git.commit).toHaveBeenCalledTimes(2);
+  expect(process.cwd()).toBe(cwd);
+});
 
 it.each([false, true])("does not offer or attempt push when no repository has an unambiguous remote (push=%s)", async (push) => {
   vi.mocked(git.getPushRemote).mockResolvedValue(null);

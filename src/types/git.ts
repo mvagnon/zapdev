@@ -11,3 +11,6 @@ export type HookReporter = (event: HookEvent) => void;
 
 /** Receive decoded live output from Git's stdout or stderr. */
 export type GitOutputReporter = (chunk: string, stream: "stdout" | "stderr") => void;
+
+/** Linked worktrees selected for cleanup, executed from the preserved main repository. */
+export type WorktreeCleanup = { repo: string; branch: string; paths: string[] };

@@ -147,7 +147,10 @@ Run `zapdev` or `zapdev commit` to start the commit flow. Both accept the flags 
 
 Stages changes, scans for secrets with Gitleaks when installed, generates Conventional Commit messages, then lets you review and optionally push.
 
-- **Repositories:** uses the current Git repository (including from a subdirectory), or direct child repositories when outside one. No recursive search; `node_modules` is excluded.
+- **Repositories:** accepts an optional path, defaulting to the current directory.
+  Uses its enclosing Git repository (including from a subdirectory), or direct child repositories when outside one.
+  No recursive search; `node_modules` is excluded.
+  Does not change your terminal's directory.
 - **Review:** commit all, commit one repository, edit a message, or cancel. Unselected changes remain staged.
 - **Push:** asks once, only for repositories committed during this run. Use `--push` to skip confirmation or `--no-push` to keep commits local. With `--yes`, nothing is pushed unless `--push` is explicitly set.
 
@@ -168,6 +171,7 @@ Stages changes, scans for secrets with Gitleaks when installed, generates Conven
 
 ```bash
 zapdev commit              # review messages, commit, then confirm push
+zapdev commit ../my-repo --yes # commit another repository without changing directory
 zapdev commit -t feat      # force the commit type
 zapdev commit -t 'feat!'   # force a breaking change
 zapdev commit -syp         # commit staged changes and push without review
@@ -191,7 +195,9 @@ All explicit flags override `--yes`, regardless of argument order: `-T` asks for
 
 ### `zapdev pr`
 
-Creates a GitHub pull request for the current repository and branch. Outside a Git repository, detects direct child repositories, like `commit`.
+Creates a GitHub pull request for the selected repository and branch.
+Accepts an optional path, defaulting to the current directory.
+Outside a Git repository, detects direct child repositories, like `commit`.
 
 ```bash
 zapdev pr
@@ -199,6 +205,7 @@ zapdev pr -b develop
 zapdev pr -y -b develop
 zapdev pr --closes https://github.com/owner/repo/issues/123
 zapdev pr -c https://trello.com/c/abc/task
+zapdev pr ../my-worktree --cleanup-worktrees
 ```
 
 | Flag | Description |
@@ -206,6 +213,7 @@ zapdev pr -c https://trello.com/c/abc/task
 | `-c, --closes <url>` | Append `Closes <url>` for the PM task; optional HTTP(S) URL |
 | `-b, --branch <name>` | Target branch; defaults to the GitHub repository's default branch |
 | `-y, --yes` | Push branches and create all PRs without confirmation |
+| `--cleanup-worktrees` | Remove the source branch's linked worktree directories after successful PR creation, without force |
 | `--url`, `--model`, `--effort` | Override the same LLM settings as `commit` |
 
 - Requires a clean working tree, including staged, unstaged and untracked files. Otherwise, stops before fetching, generating a title or pushing, with instructions to commit or stash changes. This also applies with `--yes` and without a terminal.
@@ -214,6 +222,11 @@ zapdev pr -c https://trello.com/c/abc/task
 - Builds the description locally: bullet points grouped by commit type, bold scopes, and a separate breaking-changes section for `!`, `BREAKING CHANGE:`, or `BREAKING-CHANGE:`. Unlike a release changelog, all types are included; nonconventional subjects go under Other Changes.
 - Shows the title and description, then asks before pushing and creating the PR. With `--yes` / `-y` or without a terminal, proceeds without confirmation. Never force-pushes or stages pending changes.
 - With multiple repositories, prepares PRs in parallel and lets you create all PRs or just one. Every repository must have a clean working tree and a valid PR context; preparation failures stop the command before any push or PR creation. `--branch` and `--closes` apply to every PR.
+- Worktree cleanup is **opt-in** with `--cleanup-worktrees`:
+  - Run from outside every targeted linked worktree, including its subdirectories and symlinked paths; otherwise, the command refuses before any push.
+  - After all selected PRs are created successfully, removes matching worktree directories and Git registrations, **including ignored files** inside those directories.
+  - Preserves the main worktree, branches and commits.
+  - Skips locked, missing, dirty (including untracked files), or branch/HEAD-changed worktrees with warnings; deletion is never forced.
 - Targets the selected remote's repository; does not create forks. `Closes` adds a reference, not a direct PM API action; automatic task closure depends on the provider's integration.
 
 ### Zed IDE
