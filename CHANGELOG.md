@@ -1,5 +1,17 @@
 # Changelog
 
+## [5.2.0](https://github.com/mvagnon/zapdev/compare/v5.1.0...v5.2.0) (2026-10-25)
+
+
+### Features
+
+* **worktrees:** Discover repositories from a path and perform worktree cleanup. ([c445e36](https://github.com/mvagnon/zapdev/commit/c445e363b8d0c9230cc469fd1de98c97af99d540))
+
+
+### Bug Fixes
+
+* **pr:** Add JSON output for PRs and worktree cleanup results ([bf62815](https://github.com/mvagnon/zapdev/commit/bf628154c3639b4baa7dfd23dadb8f509096b6bc))
+
 ## [5.1.0](https://github.com/mvagnon/zapdev/compare/v5.0.0...v5.1.0) (2026-10-22)
 
 
