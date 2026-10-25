@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { confirm, log, select } from "@clack/prompts";
+import { confirm, intro, log, note, outro, select } from "@clack/prompts";
 import { runCommand } from "citty";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -10,7 +10,7 @@ vi.mock("@clack/prompts", async (importOriginal) => ({
   ...await importOriginal<typeof import("@clack/prompts")>(),
   cancel: vi.fn(), confirm: vi.fn(), intro: vi.fn(), note: vi.fn(), outro: vi.fn(), select: vi.fn(),
   isCancel: (value: unknown) => typeof value === "symbol",
-  log: { warn: vi.fn() },
+  log: { warn: vi.fn(), success: vi.fn() },
 }));
 vi.mock("../lib/git");
 vi.mock("../lib/github");
@@ -27,6 +27,7 @@ import { reportError } from "./report-error";
 
 const stdinTTY = process.stdin.isTTY;
 const stdoutTTY = process.stdout.isTTY;
+const exitCode = process.exitCode;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -34,6 +35,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   process.stdin.isTTY = stdinTTY;
   process.stdout.isTTY = stdoutTTY;
+  process.exitCode = exitCode;
 });
 
 beforeEach(() => {
@@ -247,7 +249,10 @@ it.each([false, true])("only removes matching linked worktrees after successful 
 
   const removals = vi.mocked(git).mock.calls.filter(([args]) => args[0] === "worktree" && args[1] === "remove");
   expect(removals).toEqual(fails ? [] : [[["worktree", "remove", "--", path], main]]);
-  if (!fails) expect(reportError).not.toHaveBeenCalled();
+  if (!fails) {
+    expect(reportError).not.toHaveBeenCalled();
+    expect(log.success).toHaveBeenCalledExactlyOnceWith(`Deleted worktree: ${JSON.stringify(path)}`);
+  } else expect(log.success).not.toHaveBeenCalled();
 });
 
 it("preserves locked, missing, changed and dirty worktrees, continuing cleanup without force", async () => {
@@ -267,7 +272,84 @@ it("preserves locked, missing, changed and dirty worktrees, continuing cleanup w
   const removals = vi.mocked(git).mock.calls.filter(([args]) => args[0] === "worktree" && args[1] === "remove");
   expect(removals).toEqual(paths.slice(3).map((path) => [["worktree", "remove", "--", path], main]));
   expect(log.warn).toHaveBeenCalledTimes(4);
+  expect(log.success).toHaveBeenCalledExactlyOnceWith(`Deleted worktree: ${JSON.stringify(paths[4])}`);
   expect(reportError).not.toHaveBeenCalled();
+});
+
+it.each([false, true])("emits only structured PR and cleanup results on stdout with --json (TTY=%s)", async (interactive) => {
+  process.stdin.isTTY = interactive;
+  process.stdout.isTTY = interactive;
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const main = await realpath(process.cwd());
+  const removed = join(main, "src");
+  const skipped = join(main, "src", "types");
+  vi.mocked(git).mockImplementation(async (args) => {
+    if (args[0] === "worktree" && args[1] === "list") return `worktree ${main}\0HEAD base-sha\0branch refs/heads/main\0\0worktree ${removed}\0HEAD head-sha\0branch refs/heads/feature/pr\0\0worktree ${skipped}\0HEAD head-sha\0branch refs/heads/feature/pr\0\0`;
+    if (args[0] === "worktree" && args.at(-1) === skipped) throw new Error("contains untracked files");
+    return "head-sha";
+  });
+  vi.mocked(push).mockImplementation(async (_repo, _remote, _branch, _onHook, onOutput) => {
+    onOutput!("Native Git diagnostic\n", "stdout");
+  });
+
+  await runCommand(prCommand, { rawArgs: ["--json", "--yes", "--cleanup-worktrees"] });
+
+  expect(stdout).toHaveBeenCalledExactlyOnceWith(`${JSON.stringify({ pullRequests: [{
+    repo: "/repo", branch: "feature/pr", url: "https://github.com/owner/repo/pull/1",
+    deletedWorktrees: [removed], skippedWorktrees: [{ path: skipped, reason: "contains untracked files" }],
+  }] })}\n`);
+  expect(stderr).toHaveBeenCalledWith("Native Git diagnostic\n");
+  for (const output of [intro, note, outro, confirm, select, runTask, log.warn, log.success, reportError]) expect(output).not.toHaveBeenCalled();
+});
+
+it.each([[], ["--cleanup-worktrees"]])("returns empty cleanup arrays in JSON when nothing is deleted (%j)", async (...flags: string[]) => {
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  vi.mocked(git).mockImplementation(async (args) => args[0] === "worktree"
+    ? `worktree ${process.cwd()}\0HEAD head-sha\0branch refs/heads/feature/pr\0\0`
+    : "head-sha");
+
+  await runCommand(prCommand, { rawArgs: ["--json", "--yes", ...flags] });
+
+  expect(stdout).toHaveBeenCalledExactlyOnceWith(`${JSON.stringify({ pullRequests: [{
+    repo: "/repo", branch: "feature/pr", url: "https://github.com/owner/repo/pull/1", deletedWorktrees: [], skippedWorktrees: [],
+  }] })}\n`);
+});
+
+it("emits an empty JSON result without human output when no repository is found", async () => {
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  vi.mocked(findRepos).mockResolvedValue([]);
+
+  await runCommand(prCommand, { rawArgs: ["--json", "--yes"] });
+
+  expect(stdout).toHaveBeenCalledExactlyOnceWith('{"pullRequests":[]}\n');
+  expect(log.warn).not.toHaveBeenCalled();
+});
+
+it("preserves created PRs in JSON and returns failure when a later PR fails", async () => {
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  vi.mocked(findRepos).mockResolvedValue(["/repos/front", "/repos/back"]);
+  vi.mocked(github).mockResolvedValueOnce("https://github.com/owner/front/pull/1").mockRejectedValueOnce(new Error("creation failed"));
+
+  await runCommand(prCommand, { rawArgs: ["--json", "--yes"] });
+
+  expect(stdout).toHaveBeenCalledExactlyOnceWith(`${JSON.stringify({ pullRequests: [{
+    repo: "/repos/front", branch: "feature/pr", url: "https://github.com/owner/front/pull/1", deletedWorktrees: [], skippedWorktrees: [],
+  }], error: "back: creation failed" })}\n`);
+  expect(process.exitCode).toBe(1);
+  expect(reportError).not.toHaveBeenCalled();
+});
+
+it("requires explicit confirmation for JSON output in a terminal without printing prompts", async () => {
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+  await runCommand(prCommand, { rawArgs: ["--json"] });
+
+  expect(stdout).toHaveBeenCalledExactlyOnceWith(`${JSON.stringify({ pullRequests: [], error: "Use --yes with --json in a terminal to confirm PR creation." })}\n`);
+  expect(findRepos).not.toHaveBeenCalled();
+  expect(confirm).not.toHaveBeenCalled();
+  expect(push).not.toHaveBeenCalled();
+  expect(process.exitCode).toBe(1);
 });
 
 it.each([false, true])("cleans real worktree directories safely and detects cwd through a symlink (inside=%s)", async (inside) => {

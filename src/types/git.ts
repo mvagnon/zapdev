@@ -14,3 +14,9 @@ export type GitOutputReporter = (chunk: string, stream: "stdout" | "stderr") => 
 
 /** Linked worktrees selected for cleanup, executed from the preserved main repository. */
 export type WorktreeCleanup = { repo: string; branch: string; paths: string[] };
+
+/** Worktree directories actually deleted or preserved with their cleanup failure reason. */
+export type WorktreeCleanupResult = {
+  deletedWorktrees: string[];
+  skippedWorktrees: { path: string; reason: string }[];
+};

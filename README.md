@@ -206,6 +206,7 @@ zapdev pr -y -b develop
 zapdev pr --closes https://github.com/owner/repo/issues/123
 zapdev pr -c https://trello.com/c/abc/task
 zapdev pr ../my-worktree --cleanup-worktrees
+zapdev pr ../my-worktree --yes --cleanup-worktrees --json
 ```
 
 | Flag | Description |
@@ -214,6 +215,7 @@ zapdev pr ../my-worktree --cleanup-worktrees
 | `-b, --branch <name>` | Target branch; defaults to the GitHub repository's default branch |
 | `-y, --yes` | Push branches and create all PRs without confirmation |
 | `--cleanup-worktrees` | Remove the source branch's linked worktree directories after successful PR creation, without force |
+| `--json` | Emit one JSON result on stdout, with PR URLs and deleted/skipped worktrees; requires `--yes` in a terminal |
 | `--url`, `--model`, `--effort` | Override the same LLM settings as `commit` |
 
 - Requires a clean working tree, including staged, unstaged and untracked files. Otherwise, stops before fetching, generating a title or pushing, with instructions to commit or stash changes. This also applies with `--yes` and without a terminal.
@@ -227,6 +229,12 @@ zapdev pr ../my-worktree --cleanup-worktrees
   - After all selected PRs are created successfully, removes matching worktree directories and Git registrations, **including ignored files** inside those directories.
   - Preserves the main worktree, branches and commits.
   - Skips locked, missing, dirty (including untracked files), or branch/HEAD-changed worktrees with warnings; deletion is never forced.
+  - Prints each successfully deleted directory, not just a generic cleanup message.
+- With `--json`, stdout contains only a JSON object with a `pullRequests` array.
+  Each entry contains `repo`, `branch`, `url`, `deletedWorktrees` (paths), and `skippedWorktrees` (`path` and `reason` objects).
+  Cleanup arrays are empty when nothing was deleted or skipped, including when cleanup was not requested.
+  Prompts and human-readable progress are suppressed; native Git diagnostics go to stderr.
+  Runtime failures add an `error` string and set exit code 1, preserving any PR results already completed.
 - Targets the selected remote's repository; does not create forks. `Closes` adds a reference, not a direct PM API action; automatic task closure depends on the provider's integration.
 
 ### Zed IDE

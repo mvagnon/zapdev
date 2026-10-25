@@ -12,8 +12,11 @@ import { getPrContext, github } from "../lib/github";
 import { generatePrTitle } from "../lib/llm";
 import { buildPrDescription, validateClosesUrl } from "../lib/pr";
 import { cleanupWorktrees, prepareWorktreeCleanup } from "../lib/worktrees";
+import type { GitOutputReporter, HookReporter, WorktreeCleanupResult } from "../types/git";
 import { runTask } from "./git-task";
 import { reportError } from "./report-error";
+
+type PublishedPr = WorktreeCleanupResult & { repo: string; branch: string; url: string };
 
 /** Review and publish PRs for the current repository or direct child repositories. */
 export const prCommand = defineCommand({
@@ -25,17 +28,25 @@ export const prCommand = defineCommand({
     branch: { type: "string", alias: "b", description: "Target branch of the PR; defaults to the repository's default branch." },
     yes: { type: "boolean", alias: "y", description: "Push branches and create all PRs without confirmation." },
     "cleanup-worktrees": { type: "boolean", description: "After PR creation, remove the source branch's linked worktree directories without force; run from outside them." },
+    json: { type: "boolean", description: "Write PR URLs and worktree cleanup results as JSON; requires --yes in a terminal." },
   },
   async run({ args }) {
-    const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+    const terminal = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+    const interactive = terminal && !args.json;
+    const result: { pullRequests: PublishedPr[]; error?: string } = { pullRequests: [] };
+    async function task<T>(title: string, success: string, run: (onOutput: GitOutputReporter, onHook: HookReporter) => Promise<T>): Promise<T> {
+      if (!args.json) return runTask(title, success, run);
+      return run((chunk) => { process.stderr.write(chunk); }, () => {});
+    }
     try {
+      if (args.json && terminal && !args.yes) throw new Error("Use --yes with --json in a terminal to confirm PR creation.");
       const closes = validateClosesUrl(args.closes);
       const config = resolveConfig(process.env, args);
       resolveHookTimeout();
       if (interactive) intro("zapdev pr");
       const repos = await findRepos(resolve(args.path));
       if (repos.length === 0) {
-        log.warn("No git repository found here or in direct children.");
+        if (!args.json) log.warn("No git repository found here or in direct children.");
         if (interactive) outro("Nothing to do.");
         return;
       }
@@ -53,7 +64,7 @@ export const prCommand = defineCommand({
           throw new Error("Cannot create a PR with uncommitted changes (staged, unstaged or untracked files). Commit or stash them, then run zapdev pr again.");
         }
       })));
-      const results = await runTask("Preparing PRs in parallel", "PRs prepared", async () => {
+      const results = await task("Preparing PRs in parallel", "PRs prepared", async () => {
         const results = await Promise.allSettled(repos.map((repo) => inRepository(repo, async () => {
           const context = await getPrContext(repo, args.branch);
           const title = await generatePrTitle(context.commits, config);
@@ -65,7 +76,7 @@ export const prCommand = defineCommand({
         });
       });
       for (const { repo, context, title, body } of results) {
-        note(`${title}\n\n${body}`, `${multiple ? `${basename(repo)}: ` : ""}${context.branch} → ${context.base}`);
+        if (!args.json) note(`${title}\n\n${body}`, `${multiple ? `${basename(repo)}: ` : ""}${context.branch} → ${context.base}`);
       }
       let selected = results;
       if (interactive && !args.yes) {
@@ -96,24 +107,34 @@ export const prCommand = defineCommand({
       })));
       for (const { repo, context, title, body } of publications) {
         await inRepository(repo, async () => {
-          await runTask("Pushing branch", "Branch pushed", (onOutput, onHook) =>
+          await task("Pushing branch", "Branch pushed", (onOutput, onHook) =>
             push(repo, context.remote, context.branch, onHook, onOutput));
-          const url = await runTask("Creating PR", "PR created", () => github([
+          const url = await task("Creating PR", "PR created", () => github([
             "pr", "create", "--repo", context.repository, "--base", context.base,
             "--head", context.branch, "--title", title, "--body", body,
           ], repo));
-          outro(url);
+          result.pullRequests.push({ repo, branch: context.branch, url, deletedWorktrees: [], skippedWorktrees: [] });
+          if (!args.json) outro(url);
         });
       }
-      for (const { repo, context, cleanup } of publications) {
+      for (const [index, { repo, context, cleanup }] of publications.entries()) {
         if (!cleanup?.paths.length) continue;
         await inRepository(repo, async () => {
-          const warnings = await runTask("Cleaning up worktrees", "Worktree cleanup finished", () => cleanupWorktrees(cleanup, context.head));
-          for (const warning of warnings) log.warn(warning);
+          const cleaned = await task("Cleaning up worktrees", "Worktree cleanup finished", () => cleanupWorktrees(cleanup, context.head));
+          Object.assign(result.pullRequests[index]!, cleaned);
+          if (!args.json) {
+            for (const path of cleaned.deletedWorktrees) log.success(`Deleted worktree: ${JSON.stringify(path)}`);
+            for (const { path, reason } of cleaned.skippedWorktrees) log.warn(`Skipped worktree "${path}": ${reason}`);
+          }
         });
       }
     } catch (error) {
-      reportError(error);
+      if (args.json) {
+        result.error = errorMessage(error);
+        process.exitCode = 1;
+      } else reportError(error);
+    } finally {
+      if (args.json) process.stdout.write(`${JSON.stringify(result)}\n`);
     }
   },
 });

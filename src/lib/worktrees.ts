@@ -3,7 +3,7 @@ import { isAbsolute, relative, sep } from "node:path";
 
 import { errorMessage } from "./errors";
 import { git } from "./git";
-import type { WorktreeCleanup } from "../types/git";
+import type { WorktreeCleanup, WorktreeCleanupResult } from "../types/git";
 
 type Worktree = { path: string; branch?: string; head?: string; locked: boolean; prunable: boolean };
 
@@ -44,11 +44,11 @@ export async function prepareWorktreeCleanup(repo: string, branch: string): Prom
   return { repo: main.path, branch, paths: targets.map(({ path }) => path) };
 }
 
-/** Remove selected worktrees without force, preserving changed states and returning warnings for skipped paths. */
-export async function cleanupWorktrees(cleanup: WorktreeCleanup, publishedHead: string): Promise<string[]> {
+/** Remove selected worktrees without force, reporting actual deletions and reasons for skipped paths. */
+export async function cleanupWorktrees(cleanup: WorktreeCleanup, publishedHead: string): Promise<WorktreeCleanupResult> {
   const worktrees = (await listWorktrees(cleanup.repo)).slice(1);
   await assertOutsideWorktrees(worktrees.filter(({ path }) => cleanup.paths.includes(path)));
-  const warnings: string[] = [];
+  const result: WorktreeCleanupResult = { deletedWorktrees: [], skippedWorktrees: [] };
   for (const path of cleanup.paths) {
     const worktree = worktrees.find((worktree) => worktree.path === path);
     let reason: string | undefined;
@@ -58,11 +58,12 @@ export async function cleanupWorktrees(cleanup: WorktreeCleanup, publishedHead: 
     else {
       try {
         await git(["worktree", "remove", "--", path], cleanup.repo);
+        result.deletedWorktrees.push(path);
       } catch (error) {
         reason = errorMessage(error);
       }
     }
-    if (reason) warnings.push(`Skipped worktree "${path}": ${reason}`);
+    if (reason) result.skippedWorktrees.push({ path, reason });
   }
-  return warnings;
+  return result;
 }
