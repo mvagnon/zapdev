@@ -1,6 +1,3 @@
-import { realpath } from "node:fs/promises";
-import { isAbsolute, relative, sep } from "node:path";
-
 import { errorMessage } from "./errors";
 import { git } from "./git";
 import type { WorktreeCleanup, WorktreeCleanupResult } from "../types/git";
@@ -22,32 +19,18 @@ async function listWorktrees(repo: string): Promise<Worktree[]> {
   });
 }
 
-async function assertOutsideWorktrees(worktrees: Worktree[]): Promise<void> {
-  const cwd = await realpath(process.cwd());
-  for (const worktree of worktrees) {
-    if (worktree.prunable) continue;
-    const path = await realpath(worktree.path);
-    const fromWorktree = relative(path, cwd);
-    if (!isAbsolute(fromWorktree) && fromWorktree !== ".." && !fromWorktree.startsWith(`..${sep}`)) {
-      throw new Error(`Run zapdev pr from outside worktree "${worktree.path}" (including its subdirectories) when using --cleanup-worktrees.`);
-    }
-  }
-}
-
-/** Select the branch's linked worktrees, refusing to delete the caller's current directory. */
+/** Select the branch's linked worktrees for cleanup. */
 export async function prepareWorktreeCleanup(repo: string, branch: string): Promise<WorktreeCleanup> {
   const worktrees = await listWorktrees(repo);
   const main = worktrees[0];
   if (!main) throw new Error("Cannot find the main Git worktree for cleanup.");
   const targets = worktrees.slice(1).filter((worktree) => worktree.branch === `refs/heads/${branch}`);
-  await assertOutsideWorktrees(targets);
   return { repo: main.path, branch, paths: targets.map(({ path }) => path) };
 }
 
 /** Remove selected worktrees without force, reporting actual deletions and reasons for skipped paths. */
 export async function cleanupWorktrees(cleanup: WorktreeCleanup, publishedHead: string): Promise<WorktreeCleanupResult> {
   const worktrees = (await listWorktrees(cleanup.repo)).slice(1);
-  await assertOutsideWorktrees(worktrees.filter(({ path }) => cleanup.paths.includes(path)));
   const result: WorktreeCleanupResult = { deletedWorktrees: [], skippedWorktrees: [] };
   for (const path of cleanup.paths) {
     const worktree = worktrees.find((worktree) => worktree.path === path);

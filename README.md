@@ -225,7 +225,7 @@ zapdev pr ../my-worktree --yes --cleanup-worktrees --json
 - Shows the title and description, then asks before pushing and creating the PR. With `--yes` / `-y` or without a terminal, proceeds without confirmation. Never force-pushes or stages pending changes.
 - With multiple repositories, prepares PRs in parallel and lets you create all PRs or just one. Every repository must have a clean working tree and a valid PR context; preparation failures stop the command before any push or PR creation. `--branch` and `--closes` apply to every PR.
 - Worktree cleanup is **opt-in** with `--cleanup-worktrees`:
-  - Run from outside every targeted linked worktree, including its subdirectories and symlinked paths; otherwise, the command refuses before any push.
+  - Can remove the current worktree, even when run from a subdirectory or symlinked path; afterward, use `cd` to enter an existing directory.
   - After all selected PRs are created successfully, removes matching worktree directories and Git registrations, **including ignored files** inside those directories.
   - Preserves the main worktree, branches and commits.
   - Skips locked, missing, dirty (including untracked files), or branch/HEAD-changed worktrees with warnings; deletion is never forced.

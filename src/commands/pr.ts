@@ -27,7 +27,7 @@ export const prCommand = defineCommand({
     closes: { type: "string", alias: "c", description: "URL of the PM task closed by this PR." },
     branch: { type: "string", alias: "b", description: "Target branch of the PR; defaults to the repository's default branch." },
     yes: { type: "boolean", alias: "y", description: "Push branches and create all PRs without confirmation." },
-    "cleanup-worktrees": { type: "boolean", description: "After PR creation, remove the source branch's linked worktree directories without force; run from outside them." },
+    "cleanup-worktrees": { type: "boolean", description: "After PR creation, remove the source branch's linked worktree directories without force." },
     json: { type: "boolean", description: "Write PR URLs and worktree cleanup results as JSON; requires --yes in a terminal." },
   },
   async run({ args }) {

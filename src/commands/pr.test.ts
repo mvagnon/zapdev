@@ -199,7 +199,7 @@ it.each([undefined, "../other repo", "/absolute/repo"])("discovers repositories 
   expect(process.cwd()).toBe(cwd);
 });
 
-it.each(["", "src"])("refuses cleanup from a targeted worktree or its subdirectory before any push: %s", async (subdir) => {
+it.each(["", "src"])("allows cleanup from a targeted worktree or its subdirectory: %s", async (subdir) => {
   const cwd = await realpath(process.cwd());
   const path = subdir ? dirname(cwd) : cwd;
   vi.mocked(git).mockImplementation(async (args) => args[0] === "worktree"
@@ -208,24 +208,28 @@ it.each(["", "src"])("refuses cleanup from a targeted worktree or its subdirecto
 
   await runCommand(prCommand, { rawArgs: ["--yes", "--cleanup-worktrees"] });
 
-  expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("outside") }));
-  expect(push).not.toHaveBeenCalled();
-  expect(github).not.toHaveBeenCalled();
+  expect(reportError).not.toHaveBeenCalled();
+  expect(push).toHaveBeenCalledTimes(1);
+  expect(github).toHaveBeenCalledTimes(1);
+  expect(git).toHaveBeenCalledWith(["worktree", "remove", "--", path], dirname(path));
 });
 
-it("checks cleanup safety in every selected repository before pushing any of them", async () => {
+it("allows cleanup in every selected repository when one targets the current directory", async () => {
   const cwd = await realpath(process.cwd());
   vi.mocked(findRepos).mockResolvedValue(["/repos/front", "/repos/back"]);
   vi.mocked(git).mockImplementation(async (args, repo) => {
     if (args[0] !== "worktree") return "head-sha";
-    return `worktree ${dirname(cwd)}\0HEAD base-sha\0branch refs/heads/main\0\0worktree ${repo.endsWith("back") ? cwd : join(cwd, "src")}\0HEAD head-sha\0branch refs/heads/feature/pr\0\0`;
+    const back = repo === "/repos/back" || repo === dirname(cwd);
+    return `worktree ${back ? dirname(cwd) : join(cwd, "front-main")}\0HEAD base-sha\0branch refs/heads/main\0\0worktree ${back ? cwd : join(cwd, "src")}\0HEAD head-sha\0branch refs/heads/feature/pr\0\0`;
   });
 
   await runCommand(prCommand, { rawArgs: ["--yes", "--cleanup-worktrees"] });
 
-  expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("back:") }));
-  expect(push).not.toHaveBeenCalled();
-  expect(github).not.toHaveBeenCalled();
+  expect(reportError).not.toHaveBeenCalled();
+  expect(push).toHaveBeenCalledTimes(2);
+  expect(github).toHaveBeenCalledTimes(2);
+  expect(git).toHaveBeenCalledWith(["worktree", "remove", "--", join(cwd, "src")], join(cwd, "front-main"));
+  expect(git).toHaveBeenCalledWith(["worktree", "remove", "--", cwd], dirname(cwd));
 });
 
 it.each([false, true])("only removes matching linked worktrees after successful PR creation (creation fails=%s)", async (fails) => {
@@ -352,7 +356,7 @@ it("requires explicit confirmation for JSON output in a terminal without printin
   expect(process.exitCode).toBe(1);
 });
 
-it.each([false, true])("cleans real worktree directories safely and detects cwd through a symlink (inside=%s)", async (inside) => {
+it.each([false, true])("cleans real worktree directories even when cwd points inside through a symlink (inside=%s)", async (inside) => {
   const actual = await vi.importActual<typeof import("../lib/git")>("../lib/git");
   const root = await realpath(await mkdtemp(join(tmpdir(), "zapdev-worktrees-")));
   try {
@@ -377,16 +381,10 @@ it.each([false, true])("cleans real worktree directories safely and detects cwd 
 
     await runCommand(prCommand, { rawArgs: [clean, "--yes", "--cleanup-worktrees"] });
 
-    if (inside) {
-      expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("outside") }));
-      expect(push).not.toHaveBeenCalled();
-      await expect(access(clean)).resolves.toBeUndefined();
-    } else {
-      await expect(access(clean)).rejects.toThrow();
-      await expect(access(second)).rejects.toThrow();
-      expect(log.warn).toHaveBeenCalledTimes(2);
-      expect(reportError).not.toHaveBeenCalled();
-    }
+    await expect(access(clean)).rejects.toThrow();
+    await expect(access(second)).rejects.toThrow();
+    expect(log.warn).toHaveBeenCalledTimes(2);
+    expect(reportError).not.toHaveBeenCalled();
     for (const path of [main, dirty, locked]) await expect(access(path)).resolves.toBeUndefined();
     expect((await actual.git(["show-ref", "--verify", "refs/heads/feature/pr"], main)).trim()).toContain(head);
   } finally {
