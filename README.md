@@ -11,7 +11,7 @@
 
 > [!TIP]
 > **Working with an AI assistant?** Use **[zapdev-mcp](https://github.com/mvagnon/zapdev-mcp)**
-> to expose preparation, services, commit, and pull request tools directly to your MCP client.
+> to expose preparation, updates, services, commit, and pull request tools directly to your MCP client.
 
 ## Project Introduction
 
@@ -266,17 +266,18 @@ zapdev pr ../my-worktree --non-interactive --cleanup-worktrees --json
   Runtime failures add an `error` string and set exit code 1, preserving any PR results already completed.
 - Targets the selected remote's repository; does not create forks. `Closes` adds a reference, not a direct PM API action; automatic task closure depends on the provider's integration.
 
-### Preparation and services
+### Preparation, updates and services
 
-These commands ask for missing arguments and confirm mutations in a terminal.
+Preparation and service commands ask for missing arguments and confirm mutations in a terminal.
 Use `--non-interactive` to skip all questions and accept defaults, and `--json` for machine-readable output.
-Without a terminal, preparation/service commands require `--non-interactive` (legacy `--yes` / `-y` also work).
+Without a terminal, these commands require `--non-interactive` (legacy `--yes` / `-y` also work).
 Required inputs without defaults must still be supplied.
 No LLM configuration is needed.
 
 | Command | Inputs and defaults |
 | ------- | ------------------- |
 | `zapdev prepare-repo [owner/repo]` | Required GitHub repository; optional `--group` and `--branch` (remote default branch) |
+| `zapdev update-repo [path]` | Current repository or immediate children; optional `--branch` (each current branch) |
 | `zapdev prepare-worktree [path]` | Current directory by default; required `--branch` for the new local branch |
 | `zapdev services list [path]` | Current directory; optional `--service` filter, otherwise all configured services |
 | `zapdev services start [path]` | Same selection; starts Linux/systemd user services |
@@ -285,6 +286,8 @@ No LLM configuration is needed.
 
 ```bash
 zapdev prepare-repo
+zapdev update-repo
+zapdev update-repo ../my-group --branch main --non-interactive --json
 zapdev prepare-worktree --branch feat/search
 zapdev services start
 zapdev services logs ../my-worktree --service api --lines 50 --non-interactive --json
@@ -293,6 +296,15 @@ zapdev services logs ../my-worktree --service api --lines 50 --non-interactive -
 `prepare-repo` clones/resets only its disposable checkout under `ZD_REPOS_DIR/[group/]owner__repo`.
 **It discards tracked edits and untracked non-ignored files there.**
 It must be explicitly requested, not used as an automatic prerequisite.
+
+`update-repo` fetches and fast-forwards the enclosing repository or immediate child repositories without resetting, cleaning, stashing, rebasing or pushing.
+Without `--branch`, prompts for each repository in a terminal: the first input is empty, subsequent inputs reuse the previous answer, and an empty answer keeps that repository's current branch.
+With `--non-interactive`, defaults to each current branch; `--branch` selects the same branch in every repository, creating it from the remote if absent locally.
+Uses the selected branch's upstream remote and branch when configured, otherwise `origin` or the only remote and the same branch name; ambiguous or missing remotes fail.
+Local commits and staged, unstaged and untracked changes are retained; divergent histories or changes blocking a switch or fast-forward cause failure instead of overwriting local work.
+Stops at the first failure without rolling back completed updates or a successful branch switch; JSON returns completed repository `paths` and an optional `error`.
+Does not link secrets or run preparation commands.
+
 `prepare-worktree` creates worktrees from source HEADs under `~/.zapdev/worktrees/<branch with / replaced by __>`.
 It never resets sources or overwrites existing branches or paths.
 Group paths select immediate child repositories; repository paths select only the enclosing repository.

@@ -21,7 +21,7 @@ class Cancelled extends Error {}
 
 /** Prompt for a missing value, confirm effects, and render human or lossless JSON results. */
 export async function runWorkspaceTask(name: string, args: Options, run: (ui: {
-  input: (value: string | undefined, message: string, fallback?: string) => Promise<string>;
+  input: (value: string | undefined, message: string, fallback?: string, initialValue?: string) => Promise<string>;
   confirm: (message: string) => Promise<void>;
   task: <T>(title: string, success: string, work: () => Promise<T>) => Promise<T>;
 }) => Promise<WorkspaceResult>): Promise<void> {
@@ -32,13 +32,13 @@ export async function runWorkspaceTask(name: string, args: Options, run: (ui: {
     if (terminal && args.json && !args["non-interactive"] && !args.yes) throw new Error("Use --non-interactive with --json in a terminal.");
     if (interactive) intro(`zapdev ${name}`);
     const result = await run({
-      async input(value, message, fallback) {
+      async input(value, message, fallback, initialValue) {
         if (value !== undefined) return value;
         if (!interactive) {
           if (fallback !== undefined) return fallback;
           throw new Error(`${message} is required in non-interactive mode.`);
         }
-        const answer = await text({ message, placeholder: fallback, defaultValue: fallback, validate: value =>
+        const answer = await text({ message, placeholder: fallback, defaultValue: fallback, initialValue, validate: value =>
           !value?.trim() && fallback === undefined ? "A value is required." : undefined });
         if (isCancel(answer)) throw new Cancelled();
         return answer.trim();

@@ -10,6 +10,7 @@ import { x } from "tinyexec";
 import { commit, currentBranch, findRepos, getBranchCommits, getPushRemote, getUpstreamRemote, getRepoStatus, getStagedDiff, getStagedDiffStats, git, push, stageAll, switchBranch } from "./git";
 import type { HookEvent } from "../types/git";
 import { prepareCommitContext } from "./commit-context";
+import { updateRepository } from "./update-repo";
 
 const exec = promisify(execFile);
 let root: string;
@@ -188,6 +189,53 @@ it("creates an unborn branch without losing staged changes", async () => {
   await switchBranch(root, "feature/initial");
   await expect(currentBranch(root)).resolves.toBe("feature/initial");
   await expect(getStagedDiff(root)).resolves.toContain("change");
+});
+
+it.each(["dirty", "ahead", "diverged", "overlap", "custom", "upstream"])("updates remote branches without losing local work (%s)", async (scenario) => {
+  await configureHooks();
+  await writeFile(join(root, "local.txt"), "initial\n");
+  await stageAll(root);
+  await commit(root, "chore: initial");
+  await git(["branch", "-M", "main"], root);
+  const local = join(root, "checkout");
+  await git(["clone", "--quiet", root, local], root);
+  await writeFile(join(local, "untracked.txt"), "keep me");
+  if (["custom", "upstream"].includes(scenario)) await git(["switch", "-c", "other"], root);
+  if (scenario === "upstream") await git(["config", "branch.main.merge", "refs/heads/other"], local);
+  if (scenario !== "ahead") {
+    await writeFile(join(root, "file.txt"), "remote update\n");
+    await git(["add", "file.txt"], root);
+    await commit(root, "feat: remote update");
+  }
+  if (["ahead", "diverged"].includes(scenario)) {
+    await writeFile(join(local, "local.txt"), "local commit\n");
+    await git(["add", "local.txt"], local);
+    await git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "feat: local work"], local);
+  }
+  if (["dirty", "overlap"].includes(scenario)) {
+    const file = scenario === "dirty" ? "local.txt" : "file.txt";
+    await writeFile(join(local, file), "staged work\n");
+    await git(["add", file], local);
+    await writeFile(join(local, file), "staged work\nunstaged work\n");
+  }
+  const head = await git(["rev-parse", "HEAD"], local);
+  const staged = await getStagedDiff(local);
+  const unstaged = await git(["diff"], local);
+  const remoteHead = await git(["rev-parse", "HEAD"], root);
+  const branch = scenario === "custom" ? "other" : "main";
+
+  if (["diverged", "overlap"].includes(scenario)) {
+    await expect(updateRepository(local, branch)).rejects.toThrow();
+    await expect(git(["rev-parse", "HEAD"], local)).resolves.toBe(head);
+  } else {
+    await updateRepository(local, branch);
+    await expect(currentBranch(local)).resolves.toBe(branch);
+    await expect(git(["rev-parse", "HEAD"], local)).resolves.toBe(scenario === "ahead" ? head : remoteHead);
+  }
+  await expect(getStagedDiff(local)).resolves.toBe(staged);
+  await expect(git(["diff"], local)).resolves.toBe(unstaged);
+  await expect(git(["ls-files", "--others", "--exclude-standard"], local)).resolves.toContain("untracked.txt");
+  await expect(git(["rev-parse", "HEAD"], root)).resolves.toBe(remoteHead);
 });
 
 it.each([0, 3])("observes live commit hooks and preserves their failure output (exit %s)", async (exitCode) => {
