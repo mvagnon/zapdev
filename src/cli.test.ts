@@ -1,4 +1,4 @@
-import { log, note, settings, updateSettings } from "@clack/prompts";
+import { cancel, log, note, select, settings, updateSettings } from "@clack/prompts";
 import { runCommand, runMain } from "citty";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -11,6 +11,9 @@ vi.mock("@clack/prompts", async (importOriginal) => ({
   ...await importOriginal<typeof import("@clack/prompts")>(),
   log: { error: vi.fn() },
   note: vi.fn(),
+  cancel: vi.fn(),
+  select: vi.fn(),
+  isCancel: (value: unknown) => typeof value === "symbol",
 }));
 vi.mock("./commands/commit", () => ({ commitCommand: { args: {} } }));
 vi.mock("./commands/pr", () => ({ prCommand: { args: {} } }));
@@ -31,7 +34,8 @@ afterEach(() => {
 });
 
 it.each([
-  { args: [], interactive: true },
+  { args: ["commit"], interactive: true },
+  { args: ["--non-interactive", "--json"], interactive: false },
   { args: ["--help"], interactive: true },
   { args: ["--version"], interactive: false },
   { args: ["--type", "invalid"], interactive: true, error: new Error("Invalid commit type") },
@@ -76,4 +80,46 @@ it.each([
     expect(note).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   }
+});
+
+it.each([
+  ["commit"], ["pr"], ["prepare-repo"], ["prepare-worktree"],
+  ["services", "list"], ["services", "start"], ["services", "stop"], ["services", "logs"],
+])("dispatches only the selected command from the bare CLI menu (%j)", async (...path: string[]) => {
+  process.argv = [argv[0]!, argv[1]!];
+  process.stdin.isTTY = true;
+  process.stdout.isTTY = true;
+  for (const choice of path) vi.mocked(select).mockResolvedValueOnce(choice);
+
+  await import("./cli");
+
+  expect(runCommand).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { rawArgs: path });
+  expect(runMain).not.toHaveBeenCalled();
+  expect(select).toHaveBeenCalledTimes(path.length);
+});
+
+it.each([0, 1])("does not execute anything when the menu is cancelled at level %s", async (level) => {
+  process.argv = [argv[0]!, argv[1]!];
+  process.stdin.isTTY = true;
+  process.stdout.isTTY = true;
+  if (level) vi.mocked(select).mockResolvedValueOnce("services");
+  vi.mocked(select).mockResolvedValueOnce(Symbol("cancel"));
+
+  await import("./cli");
+
+  expect(runCommand).not.toHaveBeenCalled();
+  expect(runMain).not.toHaveBeenCalled();
+  expect(cancel).toHaveBeenCalledTimes(1);
+});
+
+it.each([[false, false], [false, true], [true, false]])("shows help without running a command when the bare CLI has no terminal (%s, %s)", async (stdin, stdout) => {
+  process.argv = [argv[0]!, argv[1]!];
+  process.stdin.isTTY = stdin;
+  process.stdout.isTTY = stdout;
+
+  await import("./cli");
+
+  expect(runMain).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { rawArgs: ["--help"] });
+  expect(runCommand).not.toHaveBeenCalled();
+  expect(select).not.toHaveBeenCalled();
 });

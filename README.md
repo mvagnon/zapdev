@@ -34,7 +34,7 @@ flowchart LR
 ```
 
 - `src/index.ts`: bin launcher; enables the V8 compile cache, then loads `cli.js`.
-- `src/cli.ts`: CLI entry; registers `commit` as the default command.
+- `src/cli.ts`: CLI entry; opens the command menu and routes explicit commands or the legacy commit shorthand.
 - `src/commands/`: command UI and orchestration.
 - `src/lib/`: pure logic and isolated Git, Gitleaks, and LLM side effects.
 - `src/prompts/`: LLM prompts inlined into the bundle at build time.
@@ -145,7 +145,13 @@ npm install
 
 ## Usage
 
-Run `zapdev` or `zapdev commit` to start the commit flow. Both accept the flags below.
+Run `zapdev` without arguments to choose a command from an interactive menu.
+Choose `services` to select `list`, `start`, `stop`, or `logs` in a second menu.
+Cancelling either menu runs nothing.
+Without a terminal, bare `zapdev` shows help instead of executing a command.
+
+Run `zapdev commit` to start the commit flow directly.
+Existing flag-only invocations, such as `zapdev --non-interactive --json`, still run `commit` for compatibility.
 
 ### `zapdev commit`
 
