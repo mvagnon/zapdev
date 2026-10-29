@@ -53,7 +53,7 @@ it.each([
 
   await import("./cli");
   const command = expect.objectContaining({
-    subCommands: { commit: { args: {} }, pr: { args: {} } },
+    subCommands: expect.objectContaining({ commit: { args: {} }, pr: { args: {} } }),
   });
   if (args.includes("--help") || args.includes("--version")) {
     expect(runMain).toHaveBeenCalledExactlyOnceWith(command);

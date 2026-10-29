@@ -1,6 +1,4 @@
 import { execFileSync } from "node:child_process";
-import { readdir } from "node:fs/promises";
-import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 
@@ -10,6 +8,7 @@ import { resolveHookTimeout } from "./config";
 import { GitOutputError } from "./errors";
 import { createHookReporter } from "./git-hooks";
 import { reportProcessOutput } from "./process-output";
+import { selectRepositories } from "./repositories";
 import type { DiffStats, GitOutputReporter, HookReporter } from "../types/git";
 
 /** Run Git directly, preserving terminal output and enforcing native hook deadlines. */
@@ -184,18 +183,5 @@ export async function push(repo: string, remote: string, branch: string, onHook?
 
 /** Find the enclosing working tree, or only direct child working trees outside a repo. */
 export async function findRepos(path: string): Promise<string[]> {
-  const root = await repoRoot(path);
-  if (root) return [root];
-
-  const entries = await readdir(path, { withFileTypes: true }).catch(() => null);
-  if (!entries) return [];
-
-  const dirs = entries.filter((entry) => entry.isDirectory() && entry.name !== "node_modules");
-  const repos = await Promise.all(dirs.map((entry) => repoRoot(join(path, entry.name))));
-
-  return repos.filter((dir): dir is string => dir !== null).sort();
-}
-
-async function repoRoot(dir: string): Promise<string | null> {
-  return (await tryGit(["rev-parse", "--show-toplevel"], dir))?.trim() ?? null;
+  return (await selectRepositories(path)).repositories.map(({ path }) => path);
 }

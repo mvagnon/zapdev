@@ -4,6 +4,7 @@ import { cancel, confirm, intro, isCancel, log, note, outro, select } from "@cla
 import { defineCommand } from "citty";
 
 import { LLM_ARGS } from "../config/llm-args";
+import { INTERACTION_ARGS } from "../config/interaction-args";
 import { REPOSITORY_ARGS } from "../config/repository-args";
 import { resolveConfig, resolveHookTimeout } from "../lib/config";
 import { errorMessage } from "../lib/errors";
@@ -22,30 +23,33 @@ type PublishedPr = WorktreeCleanupResult & { repo: string; branch: string; url: 
 export const prCommand = defineCommand({
   meta: { name: "pr", description: "Create GitHub PRs for the current repo or direct child repos with AI titles and Conventional Commit descriptions." },
   args: {
+    ...INTERACTION_ARGS,
     ...REPOSITORY_ARGS,
     ...LLM_ARGS,
     closes: { type: "string", alias: "c", description: "URL of the PM task closed by this PR." },
     branch: { type: "string", alias: "b", description: "Target branch of the PR; defaults to the repository's default branch." },
-    yes: { type: "boolean", alias: "y", description: "Push branches and create all PRs without confirmation." },
     "cleanup-worktrees": { type: "boolean", description: "After PR creation, remove the source branch's linked worktree directories without force." },
-    json: { type: "boolean", description: "Write PR URLs and worktree cleanup results as JSON; requires --yes in a terminal." },
+    json: { type: "boolean", description: "Write PR URLs and worktree cleanup results as JSON; requires --non-interactive in a terminal." },
   },
   async run({ args }) {
     const terminal = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-    const interactive = terminal && !args.json;
+    const skipPrompts = args["non-interactive"] || args.yes;
+    const interactive = terminal && !args.json && !args["non-interactive"];
     const result: { pullRequests: PublishedPr[]; error?: string } = { pullRequests: [] };
     async function task<T>(title: string, success: string, run: (onOutput: GitOutputReporter, onHook: HookReporter) => Promise<T>): Promise<T> {
       if (!args.json) return runTask(title, success, run);
       return run((chunk) => { process.stderr.write(chunk); }, () => {});
     }
     try {
-      if (args.json && terminal && !args.yes) throw new Error("Use --yes with --json in a terminal to confirm PR creation.");
+      if (args.json && terminal && !skipPrompts) throw new Error("Use --non-interactive with --json in a terminal to confirm PR creation.");
       const closes = validateClosesUrl(args.closes);
       const config = resolveConfig(process.env, args);
       resolveHookTimeout();
       if (interactive) intro("zapdev pr");
       const repos = await findRepos(resolve(args.path));
+      if (args["non-interactive"] && args.branch !== undefined && repos.length) await git(["check-ref-format", "--branch", args.branch], repos[0]!);
       if (repos.length === 0) {
+        if (args["non-interactive"]) throw new Error(`No Git repository found in ${resolve(args.path)} or its immediate children.`);
         if (!args.json) log.warn("No git repository found here or in direct children.");
         if (interactive) outro("Nothing to do.");
         return;
@@ -79,7 +83,7 @@ export const prCommand = defineCommand({
         if (!args.json) note(`${title}\n\n${body}`, `${multiple ? `${basename(repo)}: ` : ""}${context.branch} → ${context.base}`);
       }
       let selected = results;
-      if (interactive && !args.yes) {
+      if (interactive && !skipPrompts) {
         const answer = multiple
           ? await select({
             message: "Action",

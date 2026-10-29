@@ -60,10 +60,10 @@ beforeEach(() => {
   vi.mocked(runTask).mockImplementation(async (_title, _success, run) => run(vi.fn(), vi.fn()));
 });
 
-it.each([[], ["--yes"], ["-y"], ["--no-yes"]])("only skips terminal confirmation when yes is enabled (%j)", async (...rawArgs: string[]) => {
+it.each([[], ["--non-interactive"], ["--yes"], ["-y"], ["--no-yes"]])("only skips terminal confirmation when requested (%j)", async (...rawArgs: string[]) => {
   await runCommand(prCommand, { rawArgs });
 
-  expect(confirm).toHaveBeenCalledTimes(rawArgs.includes("--yes") || rawArgs.includes("-y") ? 0 : 1);
+  expect(confirm).toHaveBeenCalledTimes(rawArgs.some((arg) => ["--non-interactive", "--yes", "-y"].includes(arg)) ? 0 : 1);
   expect(push).toHaveBeenCalledExactlyOnceWith("/repo", "origin", "feature/pr", expect.any(Function), expect.any(Function));
   expect(github).toHaveBeenCalledExactlyOnceWith([
     "pr", "create", "--repo", "owner/repo", "--base", "main", "--head", "feature/pr",
@@ -349,7 +349,7 @@ it("requires explicit confirmation for JSON output in a terminal without printin
 
   await runCommand(prCommand, { rawArgs: ["--json"] });
 
-  expect(stdout).toHaveBeenCalledExactlyOnceWith(`${JSON.stringify({ pullRequests: [], error: "Use --yes with --json in a terminal to confirm PR creation." })}\n`);
+  expect(stdout).toHaveBeenCalledExactlyOnceWith(`${JSON.stringify({ pullRequests: [], error: "Use --non-interactive with --json in a terminal to confirm PR creation." })}\n`);
   expect(findRepos).not.toHaveBeenCalled();
   expect(confirm).not.toHaveBeenCalled();
   expect(push).not.toHaveBeenCalled();

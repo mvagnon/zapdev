@@ -14,6 +14,7 @@ import {
 } from "@clack/prompts";
 
 import { COMMIT_TYPES } from "../config/commit-types";
+import { INTERACTION_ARGS } from "../config/interaction-args";
 import { LLM_ARGS } from "../config/llm-args";
 import { PROTECTED_BRANCHES } from "../config/protected-branches";
 import { REPOSITORY_ARGS } from "../config/repository-args";
@@ -37,14 +38,14 @@ import { errorMessage } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
 import { generateCommitMessage } from "../lib/llm";
 import type { CommitType } from "../types/commit";
-import type { ZapdevConfig } from "../types/config";
-import type { DiffStats } from "../types/git";
+import type { DiffStats, GitOutputReporter, HookReporter } from "../types/git";
 import { runTask } from "./git-task";
 import { reportError } from "./report-error";
 
 type Repository = { repo: string; label: string; pendingLabel: string };
 type CommitDraft = Repository & { message: string; stats: DiffStats };
 type CommitAction = "all" | "cancel" | { action: "commit" | "edit"; draft: CommitDraft };
+type CompletedCommit = { repo: string; branch: string; message: string; pushed: boolean };
 
 /** Commit the current repository or review direct child repositories together. */
 export const commitCommand = defineCommand({
@@ -54,6 +55,7 @@ export const commitCommand = defineCommand({
       "Generate and review commit messages for the current repo or direct child repos.",
   },
   args: {
+    ...INTERACTION_ARGS,
     ...REPOSITORY_ARGS,
     ...LLM_ARGS,
     type: {
@@ -92,40 +94,46 @@ export const commitCommand = defineCommand({
       alias: "s",
       description: "Commit only changes that are already staged.",
     },
-    yes: {
+    json: {
       type: "boolean",
-      alias: "y",
-      description: "Skip default prompts and keep commits local; all explicit flags take precedence.",
+      description: "Write commit results and warnings as JSON; requires --non-interactive in a terminal.",
     },
   },
   async run({ args }) {
-    const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+    const terminal = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+    const interactive = terminal && !args["non-interactive"] && !args.json;
+    const skipPrompts = args["non-interactive"] || args.yes;
+    const result: { commits: CompletedCommit[]; warnings: string[]; error?: string } = { commits: [], warnings: [] };
+    function warn(message: string): void {
+      result.warnings.push(message);
+      if (!args.json) log.warn(message, { spacing: 0 });
+    }
+    async function task<T>(title: string, success: string, run: (onOutput: GitOutputReporter, onHook: HookReporter) => Promise<T>, withGuide = true): Promise<T> {
+      if (!args.json) return runTask(title, success, run, withGuide);
+      return run((chunk) => { process.stderr.write(chunk); }, () => {});
+    }
 
-    let config: ZapdevConfig;
     try {
+      if (args.json && terminal && !skipPrompts) throw new Error("Use --non-interactive with --json in a terminal to confirm commits.");
       resolveHookTimeout();
-      config = resolveConfig(process.env, {
+      const config = resolveConfig(process.env, {
         url: args.url,
         model: args.model,
         effort: args.effort,
       });
-    } catch (error) {
-      reportError(error);
-      return;
-    }
+      if (interactive) intro("zapdev commit");
 
-    if (interactive) intro("zapdev commit");
-
-    try {
       const repos = await findRepos(resolve(args.path));
+      if (args["non-interactive"] && args.branch !== undefined && repos.length) await runGit(["check-ref-format", "--branch", args.branch], repos[0]!);
       if (repos.length === 0) {
-        log.warn("No git repository found here or in direct children.");
+        if (args["non-interactive"]) throw new Error(`No Git repository found in ${resolve(args.path)} or its immediate children.`);
+        if (!args.json) log.warn("No git repository found here or in direct children.");
         if (interactive) outro("Nothing to do.");
         return;
       }
 
       if (args.pull) {
-        const pulls = await runTask("Pulling repositories in parallel", "Repositories pulled", async (onOutput, onHook) => {
+        const pulls = await task("Pulling repositories in parallel", "Repositories pulled", async (onOutput, onHook) => {
           const results = await Promise.allSettled(repos.map(async (repo) => {
             const label = basename(repo);
             const hasChanges = args.staged
@@ -145,12 +153,12 @@ export const commitCommand = defineCommand({
           return results;
         });
         for (const result of pulls) {
-          if (result.status === "fulfilled" && result.value) log.warn(result.value, { spacing: 0 });
+          if (result.status === "fulfilled" && result.value) warn(result.value);
         }
       }
 
       let type = args.type;
-      if (args["ask-for-type"]) {
+      if (args["ask-for-type"] && !args["non-interactive"]) {
         if (!interactive) throw new Error("Choosing a commit type requires a terminal.");
         const selectedType = await select<"auto" | (typeof COMMIT_TYPES)[number]>({
           message: "Commit type",
@@ -174,13 +182,13 @@ export const commitCommand = defineCommand({
       }
 
       const repositories: Repository[] = repos.map((repo) => ({ repo, label: basename(repo), pendingLabel: basename(repo) }));
-      const { results, scan } = await runTask("Preparing repositories and generating commit messages in parallel", "Repositories prepared", async (onOutput, onHook) => {
+      const { results, scan } = await task("Preparing repositories and generating commit messages in parallel", "Repositories prepared", async (onOutput, onHook) => {
         const scan = await hasGitleaks();
         const results = await Promise.allSettled(repositories.map(async (repository) => {
           const { repo } = repository;
           const { branch, hasChanges } = await getRepoStatus(repo);
           repository.label = `${basename(repo)} (${branch})`;
-          repository.pendingLabel = hasChanges ? styleText("bold", repository.label) : repository.label;
+          repository.pendingLabel = hasChanges && !args.json ? styleText("bold", repository.label) : repository.label;
           if (!args.staged) await stageAll(repo, onOutput, onHook);
           const diff = await getStagedDiff(repo);
           if (!diff.trim()) return null;
@@ -194,18 +202,22 @@ export const commitCommand = defineCommand({
         }
         return { results, scan };
       });
-      if (!scan) log.info("Gitleaks not found, skipping secret scan.", { spacing: 0 });
+      if (!scan) {
+        const warning = "Gitleaks not found, skipping secret scan.";
+        result.warnings.push(warning);
+        if (!args.json) log.info(warning, { spacing: 0 });
+      }
 
       const drafts: CommitDraft[] = [];
       for (const [index, result] of results.entries()) {
         if (result.status === "fulfilled") {
           if (result.value) {
             drafts.push(result.value);
-          } else log.info(`${repositories[index]!.pendingLabel}: nothing to commit.`, { spacing: 0 });
+          } else if (!args.json) log.info(`${repositories[index]!.pendingLabel}: nothing to commit.`, { spacing: 0 });
         }
       }
 
-      const selected = drafts.length ? await reviewMessages(drafts, interactive && !args.yes, type) : [];
+      const selected = args.json ? drafts : drafts.length ? await reviewMessages(drafts, interactive && !skipPrompts, type) : [];
       if (!selected) {
         cancel("Cancelled (changes left staged).");
         return;
@@ -217,7 +229,7 @@ export const commitCommand = defineCommand({
         let withGuide = true;
         let targetBranch = args.branch;
         const current = await currentBranch(draft.repo);
-        if (targetBranch === undefined && (args["ask-for-branch"] || (!args.yes && PROTECTED_BRANCHES.includes(current)))) {
+        if (targetBranch === undefined && !args["non-interactive"] && (args["ask-for-branch"] || (!skipPrompts && PROTECTED_BRANCHES.includes(current)))) {
           if (!interactive) throw new Error("Choosing a branch before committing requires a terminal. Changes remain staged.");
           const answer = await text({
             message: `${basename(draft.repo)} (${current}): branch to commit to`,
@@ -236,21 +248,22 @@ export const commitCommand = defineCommand({
           draft.label = `${basename(draft.repo)} (${targetBranch})`;
           draft.pendingLabel = styleText("bold", draft.label);
         }
-        await runTask(`${draft.label}: commit`, `${draft.label}: committed ${draft.message}`, async (onOutput, onHook) => {
+        await task(`${draft.label}: commit`, `${draft.label}: committed ${draft.message}`, async (onOutput, onHook) => {
           if (targetBranch !== undefined) await switchBranch(draft.repo, targetBranch, onHook, onOutput);
           await gitCommit(draft.repo, draft.message, onHook, onOutput);
         }, withGuide);
+        result.commits.push({ repo: draft.repo, branch: targetBranch ?? current, message: draft.message, pushed: false });
         toSend.push(draft);
       }
       if (toSend.length === 0) return;
-      if (args.push === false || ((args.yes || !interactive) && !args.push)) return;
+      if (args.push === false || ((skipPrompts || !interactive) && !args.push)) return;
 
       const destinations: { repo: string; label: string; branch: string; remote: string }[] = [];
       for (const { repo, label } of toSend) {
         const branch = await currentBranch(repo);
         const remote = await getPushRemote(repo, branch);
         if (remote) destinations.push({ repo, label, branch, remote });
-        else log.warn(`${label}: no unambiguous push remote. Skipping push; commit remains local.`, { spacing: 0 });
+        else warn(`${label}: no unambiguous push remote. Skipping push; commit remains local.`);
       }
 
       let shouldPush = Boolean(args.push);
@@ -267,9 +280,12 @@ export const commitCommand = defineCommand({
       }
 
       if (shouldPush && destinations.length) {
-        await runTask("Pushing repositories in parallel", "Repositories pushed", async (onOutput, onHook) => {
-          const results = await Promise.allSettled(destinations.map(({ repo, branch, remote }) =>
-            push(repo, remote, branch, onHook, onOutput)));
+        await task("Pushing repositories in parallel", "Repositories pushed", async (onOutput, onHook) => {
+          const results = await Promise.allSettled(destinations.map(async ({ repo, branch, remote }) => {
+            await push(repo, remote, branch, onHook, onOutput);
+            const committed = result.commits.find(commit => commit.repo === repo);
+            if (committed) committed.pushed = true;
+          }));
           for (const [index, result] of results.entries()) {
             if (result.status === "rejected") throw new Error(`${destinations[index]!.label}: ${errorMessage(result.reason)}`);
           }
@@ -278,7 +294,12 @@ export const commitCommand = defineCommand({
 
       if (interactive) outro("Done.");
     } catch (error) {
-      reportError(error);
+      if (args.json) {
+        result.error = errorMessage(error);
+        process.exitCode = 1;
+      } else reportError(error);
+    } finally {
+      if (args.json) process.stdout.write(`${JSON.stringify(result)}\n`);
     }
   },
 });

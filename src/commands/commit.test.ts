@@ -15,7 +15,7 @@ vi.mock("@clack/prompts", () => ({
   taskLog: vi.fn(),
 }));
 
-import { cancel, confirm, log, note, outro, select, spinner, taskLog, text } from "@clack/prompts";
+import { cancel, confirm, intro, log, note, outro, select, spinner, taskLog, text } from "@clack/prompts";
 import * as git from "../lib/git";
 import { GitOutputError } from "../lib/errors";
 import { hasGitleaks, scanStagedChanges } from "../lib/gitleaks";
@@ -63,11 +63,75 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   process.stdin.isTTY = stdinTTY;
   process.stdout.isTTY = stdoutTTY;
   process.stdout.getColorDepth = stdoutGetColorDepth;
   process.exitCode = exitCode;
+});
+
+it.each([false, true])("emits only JSON with commit results and routes native output to stderr (TTY=%s)", async (terminal) => {
+  process.stdin.isTTY = terminal;
+  process.stdout.isTTY = terminal;
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  vi.mocked(git.commit).mockImplementation(async (_repo, _message, _onHook, onOutput) => {
+    onOutput!("Native Git output\n", "stdout");
+  });
+
+  await runCommand(commitCommand, { rawArgs: ["--json", "--non-interactive", "--branch=feature/shared", "--push"] });
+
+  expect(stdout).toHaveBeenCalledExactlyOnceWith(`${JSON.stringify({
+    commits: repos.map(repo => ({ repo, branch: "feature/shared", message: `fix: ${basename(repo)}`, pushed: true })), warnings: [],
+  })}\n`);
+  expect(stderr).toHaveBeenCalledWith("Native Git output\n");
+  for (const output of [intro, outro, select, text, confirm, spinner, taskLog, ...Object.values(log)]) expect(output).not.toHaveBeenCalled();
+});
+
+it.each(["commit", "push"])("preserves completed commits and confirmed pushes in JSON when %s fails", async (operation) => {
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  if (operation === "commit") vi.mocked(git.commit).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("commit failed"));
+  else vi.mocked(git.push).mockRejectedValueOnce(new Error("push failed"));
+
+  await runCommand(commitCommand, { rawArgs: ["--json", "--non-interactive", "--push"] });
+
+  expect(stdout).toHaveBeenCalledTimes(1);
+  const result = JSON.parse(String(stdout.mock.calls[0]![0]));
+  expect(result.commits).toEqual((operation === "commit" ? repos.slice(0, 1) : repos).map(repo => ({
+    repo, branch: "main", message: `fix: ${basename(repo)}`, pushed: operation === "push" && repo === repos[1],
+  })));
+  expect(result.error).toContain(`${operation} failed`);
+  expect(process.exitCode).toBe(1);
+});
+
+it.each(["configuration", "confirmation", "unchanged", "warnings"])("returns one JSON result for %s without human output", async (scenario) => {
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  if (scenario === "configuration") vi.stubEnv("ZD_URL", undefined);
+  if (scenario === "unchanged") vi.mocked(git.getStagedDiff).mockResolvedValue("");
+  if (scenario === "warnings") {
+    vi.mocked(hasGitleaks).mockResolvedValue(false);
+    vi.mocked(git.getUpstreamRemote).mockResolvedValue(null);
+    vi.mocked(git.getPushRemote).mockResolvedValue(null);
+  }
+
+  await runCommand(commitCommand, { rawArgs: ["--json", ...(scenario === "confirmation" ? [] : ["--non-interactive"]),
+    ...(scenario === "warnings" ? ["--pull", "--push"] : [])] });
+
+  expect(stdout).toHaveBeenCalledTimes(1);
+  const result = JSON.parse(String(stdout.mock.calls[0]![0]));
+  if (scenario === "configuration" || scenario === "confirmation") {
+    expect(result.commits).toEqual([]);
+    expect(result.error).toEqual(expect.any(String));
+    expect(git.stageAll).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  } else if (scenario === "unchanged") expect(result).toEqual({ commits: [], warnings: [] });
+  else {
+    expect(result.commits).toHaveLength(2);
+    expect(result.warnings).toHaveLength(5);
+    expect(result.commits.every((commit: { pushed: boolean }) => !commit.pushed)).toBe(true);
+  }
+  for (const output of [intro, outro, select, text, confirm, spinner, taskLog, ...Object.values(log)]) expect(output).not.toHaveBeenCalled();
 });
 
 it("generates all messages concurrently before committing any repository", async () => {
@@ -429,10 +493,14 @@ it("keeps empty inputs empty and sends to each repository's current branch, incl
   expect(process.exitCode).toBeUndefined();
 });
 
-it.each([false, true])("skips every prompt with --yes, retaining protected branches and committing locally (TTY=%s)", async (interactive) => {
+it.each([
+  [false, ["-y"]], [true, ["-y"]],
+  [false, ["--non-interactive"]], [true, ["--non-interactive"]],
+  [true, ["--non-interactive", "--ask-for-type", "--ask-for-branch"]],
+] as const)("skips prompts, retaining protected branches and committing locally (TTY=%s, args=%j)", async (interactive, rawArgs) => {
   process.stdin.isTTY = interactive;
   process.stdout.isTTY = interactive;
-  await runCommand(commitCommand, { rawArgs: ["-y"] });
+  await runCommand(commitCommand, { rawArgs: [...rawArgs] });
   expect(git.commit).toHaveBeenCalledTimes(2);
   expect(generateCommitMessage).toHaveBeenCalledWith(repos[0], expect.any(Object), undefined);
   expect(select).not.toHaveBeenCalled();
