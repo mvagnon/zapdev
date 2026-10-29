@@ -1,5 +1,9 @@
+import { lstatSync, readdirSync, realpathSync, rmdirSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
+
 import { errorMessage } from "./errors";
 import { git } from "./git";
+import { worktreeRoot } from "./repositories";
 import type { WorktreeCleanup, WorktreeCleanupResult } from "../types/git";
 
 type Worktree = { path: string; branch?: string; head?: string; locked: boolean; prunable: boolean };
@@ -42,8 +46,19 @@ export async function cleanupWorktrees(cleanup: WorktreeCleanup, publishedHead: 
       try {
         await git(["worktree", "remove", "--", path], cleanup.repo);
         result.deletedWorktrees.push(path);
+        const workspace = dirname(path);
+        if (workspace === join(worktreeRoot(), cleanup.branch.replaceAll("/", "__")) &&
+          lstatSync(workspace, { throwIfNoEntry: false })?.isDirectory() && realpathSync(workspace) === workspace) {
+          const entries = readdirSync(workspace, { withFileTypes: true });
+          if (entries.every(entry => entry.isSymbolicLink())) {
+            for (const entry of entries) unlinkSync(join(workspace, entry.name));
+            rmdirSync(workspace);
+          }
+        }
       } catch (error) {
-        reason = errorMessage(error);
+        reason = result.deletedWorktrees.includes(path)
+          ? `Worktree removed, but parent cleanup failed: ${errorMessage(error)}`
+          : errorMessage(error);
       }
     }
     if (reason) result.skippedWorktrees.push({ path, reason });

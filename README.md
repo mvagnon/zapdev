@@ -255,6 +255,7 @@ zapdev pr ../my-worktree --non-interactive --cleanup-worktrees --json
 - Worktree cleanup is **opt-in** with `--cleanup-worktrees`:
   - Can remove the current worktree, even when run from a subdirectory or symlinked path; afterward, use `cd` to enter an existing directory.
   - After all selected PRs are created successfully, removes matching worktree directories and Git registrations, **including ignored files** inside those directories.
+  - After the last worktree is removed, deletes its branch-named parent under `~/.zapdev/worktrees` if empty or containing only symlinks, without following their targets; regular files and subdirectories preserve the parent.
   - Preserves the main worktree, branches and commits.
   - Skips locked, missing, dirty (including untracked files), or branch/HEAD-changed worktrees with warnings; deletion is never forced.
   - Prints each successfully deleted directory, not just a generic cleanup message.
