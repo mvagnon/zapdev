@@ -300,6 +300,7 @@ It must be explicitly requested, not used as an automatic prerequisite.
 
 `update-repo` fetches and fast-forwards the enclosing repository or immediate child repositories without resetting, cleaning, stashing, rebasing or pushing.
 Without `--branch`, prompts for each repository in a terminal: the first input is empty, subsequent inputs reuse the previous answer, and an empty answer keeps that repository's current branch.
+Enter `*` (or pass `--branch '*'`) to keep and update each current branch and also run `git fetch origin` to refresh origin's remote-tracking references.
 With `--non-interactive`, defaults to each current branch; `--branch` selects the same branch in every repository, creating it from the remote if absent locally.
 Uses the selected branch's upstream remote and branch when configured, otherwise `origin` or the only remote and the same branch name; ambiguous or missing remotes fail.
 Local commits and staged, unstaged and untracked changes are retained; divergent histories or changes blocking a switch or fast-forward cause failure instead of overwriting local work.

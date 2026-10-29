@@ -1,8 +1,12 @@
-import { getPushRemote, git, tryGit } from "./git";
+import { currentBranch, getPushRemote, git, tryGit } from "./git";
 import { repositoryGit } from "./repositories";
 
-/** Update a selected branch from its remote without discarding local work. */
+/** Update a selected branch without discarding local work; "*" also fetches origin and keeps the current branch. */
 export async function updateRepository(repo: string, branch: string): Promise<void> {
+  if (branch === "*") {
+    branch = await currentBranch(repo);
+    await repositoryGit(repo, "fetch", "--", "origin");
+  }
   await git(["check-ref-format", "--branch", branch], repo);
   await git(["check-ref-format", `refs/heads/${branch}`], repo);
   const remote = await getPushRemote(repo, branch);

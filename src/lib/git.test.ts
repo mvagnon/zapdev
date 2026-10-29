@@ -191,7 +191,7 @@ it("creates an unborn branch without losing staged changes", async () => {
   await expect(getStagedDiff(root)).resolves.toContain("change");
 });
 
-it.each(["dirty", "ahead", "diverged", "overlap", "custom", "upstream"])("updates remote branches without losing local work (%s)", async (scenario) => {
+it.each(["dirty", "ahead", "diverged", "overlap", "custom", "upstream", "wildcard"])("updates remote branches without losing local work (%s)", async (scenario) => {
   await configureHooks();
   await writeFile(join(root, "local.txt"), "initial\n");
   await stageAll(root);
@@ -223,14 +223,19 @@ it.each(["dirty", "ahead", "diverged", "overlap", "custom", "upstream"])("update
   const unstaged = await git(["diff"], local);
   const remoteHead = await git(["rev-parse", "HEAD"], root);
   const branch = scenario === "custom" ? "other" : "main";
+  if (scenario === "wildcard") await git(["branch", "other"], root);
 
   if (["diverged", "overlap"].includes(scenario)) {
     await expect(updateRepository(local, branch)).rejects.toThrow();
     await expect(git(["rev-parse", "HEAD"], local)).resolves.toBe(head);
   } else {
-    await updateRepository(local, branch);
+    await updateRepository(local, scenario === "wildcard" ? "*" : branch);
     await expect(currentBranch(local)).resolves.toBe(branch);
     await expect(git(["rev-parse", "HEAD"], local)).resolves.toBe(scenario === "ahead" ? head : remoteHead);
+  }
+  if (scenario === "wildcard") {
+    await expect(git(["rev-parse", "refs/remotes/origin/other"], local)).resolves.toBe(remoteHead);
+    await expect(git(["show-ref", "--verify", "refs/heads/other"], local)).rejects.toThrow();
   }
   await expect(getStagedDiff(local)).resolves.toBe(staged);
   await expect(git(["diff"], local)).resolves.toBe(unstaged);

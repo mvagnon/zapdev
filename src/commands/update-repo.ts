@@ -14,7 +14,7 @@ export const updateRepoCommand = defineCommand({
   args: {
     ...WORKSPACE_ARGS,
     ...REPOSITORY_ARGS,
-    branch: { type: "string", description: "Branch to switch to and update in every repository; defaults to each current branch." },
+    branch: { type: "string", description: "Branch to switch to and update; '*' keeps each current branch and also fetches origin. Defaults to each current branch." },
   },
   async run({ args }) {
     await runWorkspaceTask("update-repo", args, async (ui) => {
@@ -24,13 +24,14 @@ export const updateRepoCommand = defineCommand({
       let previousBranchInput = "";
       for (const repo of repos) {
         const current = args.branch ?? await currentBranch(repo);
-        previousBranchInput = await ui.input(args.branch, `${basename(repo)} (${current}): branch to update`, "", previousBranchInput);
+        previousBranchInput = await ui.input(args.branch, `${basename(repo)} (${current}): branch to update (* = current branch + fetch origin)`, "", previousBranchInput);
         selections.push({ repo, branch: previousBranchInput || current });
       }
       const paths: string[] = [];
       for (const { repo, branch } of selections) {
         try {
-          await ui.task(`${basename(repo)}: updating ${branch}`, `${basename(repo)}: ${branch} updated`, () => updateRepository(repo, branch));
+          const target = branch === "*" ? "current branch and origin" : branch;
+          await ui.task(`${basename(repo)}: updating ${target}`, `${basename(repo)}: ${target} updated`, () => updateRepository(repo, branch));
           paths.push(repo);
         } catch (error) {
           return { paths, error: `${basename(repo)}: ${errorMessage(error)}` };
