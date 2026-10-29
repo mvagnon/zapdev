@@ -18,9 +18,7 @@ const main = defineCommand({
     version: pkg.version,
     description: "Fast, precise git chores from your terminal.",
   },
-  args: commitCommand.args,
   subCommands: { commit: commitCommand, pr: prCommand, "prepare-repo": prepareRepoCommand, "update-repo": updateRepoCommand, "prepare-worktree": prepareWorktreeCommand, services: servicesCommand },
-  default: "commit",
 });
 
 async function chooseCommand(): Promise<string[] | undefined> {

@@ -35,10 +35,9 @@ afterEach(() => {
 
 it.each([
   { args: ["commit"], interactive: true },
-  { args: ["--non-interactive", "--json"], interactive: false },
   { args: ["--help"], interactive: true },
   { args: ["--version"], interactive: false },
-  { args: ["--type", "invalid"], interactive: true, error: new Error("Invalid commit type") },
+  { args: ["commit", "--type", "invalid"], interactive: true, error: new Error("Invalid commit type") },
   { args: ["unknown"], interactive: false, error: new Error("Unknown command") },
 ])("enables the guide and handles CLI failures ($args, TTY=$interactive)", async ({ args, interactive, error }) => {
   process.argv = [argv[0]!, argv[1]!, ...args];

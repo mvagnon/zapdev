@@ -92,7 +92,7 @@ function readConfig(directory: string): WorkspaceConfig | undefined {
   try {
     return parseConfig(JSON.parse(readFileSync(file, "utf8")));
   } catch {
-    throw new Error(`Invalid configuration in ${file}: expected prepareCommand, named services with startCommand and optional stopCommand, and valid URLs. Legacy top-level startCommand is not supported.`);
+    throw new Error(`Invalid configuration in ${file}: expected prepareCommand, named services with startCommand and optional stopCommand, and valid URLs.`);
   }
 }
 

@@ -34,7 +34,7 @@ flowchart LR
 ```
 
 - `src/index.ts`: bin launcher; enables the V8 compile cache, then loads `cli.js`.
-- `src/cli.ts`: CLI entry; opens the command menu and routes explicit commands or the legacy commit shorthand.
+- `src/cli.ts`: CLI entry; opens the command menu and routes explicit commands.
 - `src/commands/`: command UI and orchestration.
 - `src/lib/`: pure logic and isolated Git, Gitleaks, and LLM side effects.
 - `src/prompts/`: LLM prompts inlined into the bundle at build time.
@@ -51,7 +51,7 @@ flowchart LR
 | `ZD_HOOK_TIMEOUT` | No           | Deadline per Git hook in seconds (default: `60`); positive numbers from `0.001` to `2147483.647`    |
 | `ZD_REPOS_DIR` | No | Absolute disposable checkout root and configuration/secrets scope; defaults to `~/.zapdev/repos` |
 
-The LLM settings have no defaults, automatic provider detection, or backup models. CLI flags override these settings. Legacy `OLLAMA_*` variables are no longer read.
+The LLM settings have no defaults, automatic provider detection, or backup models. CLI flags override these settings.
 
 Requests use the OpenAI Chat Completions format over plain `fetch`, without a provider SDK. Set `ZD_API_KEY` if your endpoint requires Bearer authentication; when absent or blank, no authentication header is sent. The endpoint and model must support `reasoning_effort` and **strict Structured Outputs** (`response_format.type: "json_schema"`, `strict: true`), including string `pattern` constraints with character ranges and bounded repetitions. OpenAI compatibility or JSON mode alone is not sufficient. There is no plain-text fallback.
 
@@ -151,7 +151,7 @@ Cancelling either menu runs nothing.
 Without a terminal, bare `zapdev` shows help instead of executing a command.
 
 Run `zapdev commit` to start the commit flow directly.
-Existing flag-only invocations, such as `zapdev --non-interactive --json`, still run `commit` for compatibility.
+Flags must follow an explicit command, such as `zapdev commit --non-interactive --json`.
 
 ### `zapdev commit`
 
@@ -178,6 +178,7 @@ Stages changes, scans for secrets with Gitleaks when installed, generates Conven
 | `-A, --ask-for-branch`      | Ask for a branch before every commit                                            |
 | `-s, --staged`              | Commit only already-staged changes                                              |
 | `--non-interactive`        | Skip every question, retain defaults and keep commits local unless `--push` is set |
+| `-y, --yes`                | Skip default confirmations while honoring explicit `--ask-for-type` / `--ask-for-branch` questions |
 | `--json` | Emit structured commit results and warnings; requires `--non-interactive` in a terminal |
 
 ```bash
@@ -189,6 +190,7 @@ zapdev commit -sp --non-interactive # commit staged changes and push without rev
 zapdev commit --pull       # pull first, then follow the normal flow
 zapdev commit --branch="feature/shared" --non-interactive # commit all repositories on this branch without prompts
 zapdev commit --non-interactive --json # structured output for agents and scripts
+zapdev commit -y -T -A     # skip default confirmations, but ask for the type and branch
 ```
 
 Supported types: `feat`, `fix`, `deps`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`. Messages should aim for 72 characters. The generation schema limits descriptions to 160 characters and scopes to 32 to prevent runaway output; manually edited messages can be longer. Generation has a 25-second timeout and no retries.
@@ -199,8 +201,7 @@ Supported types: `feat`, `fix`, `deps`, `chore`, `docs`, `style`, `refactor`, `p
 Explicit values and actions still apply: `--type`, `--branch`, `--push`, `--no-push`, `--pull`, `--staged`, and LLM overrides.
 Without explicit values, the type remains automatic and the current branch is retained.
 
-Deprecated `--yes` / `-y` remain available for existing scripts.
-They preserve their previous behavior: skip default prompts, but still honor explicit `-T` / `-A` questions.
+`--yes` / `-y` skip default prompts, but still honor explicit `-T` / `-A` questions.
 
 **Branches:** `--branch <name>` uses the given local branch in every selected repository without a branch prompt, even with `-A`. It switches to the existing branch or creates it from HEAD **before the commit**, preserving pending changes without force. Otherwise, before committing on `main`, `master`, `principal`, `dev`, or `development`, zapdev asks for a local branch unless non-interactive mode is set. A different name switches to an existing branch or creates it **before the commit**. Prompts reuse the previous input; empty input keeps the current branch. `-A` asks on every branch unless `--branch` or `--non-interactive` is supplied.
 
@@ -250,7 +251,7 @@ zapdev pr ../my-worktree --non-interactive --cleanup-worktrees --json
 - Fetches the target branch (`--branch`, or the GitHub repository's default branch), then reads **all complete commit messages unique to the current branch** relative to that target, oldest first. Uses the upstream remote, then `origin`, then the only remote; ambiguous remotes are refused.
 - Generates a Conventional Commit-style title with the configured LLM. Commit messages are sent in full, without truncation; the model's context limit still applies.
 - Builds the description locally: bullet points grouped by commit type, bold scopes, and a separate breaking-changes section for `!`, `BREAKING CHANGE:`, or `BREAKING-CHANGE:`. Unlike a release changelog, all types are included; nonconventional subjects go under Other Changes.
-- Shows the title and description, then asks before pushing and creating the PR. With `--non-interactive`, legacy `--yes` / `-y`, or without a terminal, proceeds without confirmation. Never force-pushes or stages pending changes.
+- Shows the title and description, then asks before pushing and creating the PR. With `--non-interactive`, `--yes` / `-y`, or without a terminal, proceeds without confirmation. Never force-pushes or stages pending changes.
 - With multiple repositories, prepares PRs in parallel and lets you create all PRs or just one. Every repository must have a clean working tree and a valid PR context; preparation failures stop the command before any push or PR creation. `--branch` and `--closes` apply to every PR.
 - Worktree cleanup is **opt-in** with `--cleanup-worktrees`:
   - Can remove the current worktree, even when run from a subdirectory or symlinked path; afterward, use `cd` to enter an existing directory.
@@ -270,7 +271,7 @@ zapdev pr ../my-worktree --non-interactive --cleanup-worktrees --json
 
 Preparation and service commands ask for missing arguments and confirm mutations in a terminal.
 Use `--non-interactive` to skip all questions and accept defaults, and `--json` for machine-readable output.
-Without a terminal, these commands require `--non-interactive` (legacy `--yes` / `-y` also work).
+Without a terminal, these commands require `--non-interactive` or `--yes` / `-y`.
 Required inputs without defaults must still be supplied.
 No LLM configuration is needed.
 
