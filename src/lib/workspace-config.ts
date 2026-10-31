@@ -27,9 +27,10 @@ function resourceDirectory(root: string, source: string | undefined, kind: "conf
   return directory;
 }
 
-/** Resolve resources exclusively at the selected scope, falling back once to parent or immediate repositories. */
+/** Resolve resources at the selected scope, optionally falling back once to parent or immediate repositories. */
 export function resolveResources<T>(
   selection: RepositorySelection, kind: "config" | "secrets", read: (directory: string, recursive: boolean) => T | undefined,
+  allowFallback = true,
 ): { path: string; value: T }[] {
   const { root, path, source, isRepository, repositories } = selection;
   const at = (target: { path: string; source: string | undefined }, recursive: boolean): { path: string; value: T }[] => {
@@ -38,7 +39,7 @@ export function resolveResources<T>(
     return value === undefined ? [] : [{ path: target.path, value }];
   };
   const own = at(selection, isRepository);
-  if (own.length > 0) return own;
+  if (own.length > 0 || !allowFallback) return own;
   const fallback = isRepository
     ? at({ path: dirname(path), source: source === undefined ? undefined : dirname(source) }, false)
     : repositories.flatMap(repository => at(repository, true));
@@ -97,6 +98,6 @@ function readConfig(directory: string): WorkspaceConfig | undefined {
 }
 
 /** Resolve repository/group configuration independently from secrets. */
-export function resolveConfigs(selection: RepositorySelection): { path: string; value: WorkspaceConfig }[] {
-  return resolveResources(selection, "config", readConfig);
+export function resolveConfigs(selection: RepositorySelection, allowFallback = true): { path: string; value: WorkspaceConfig }[] {
+  return resolveResources(selection, "config", readConfig, allowFallback);
 }

@@ -297,6 +297,9 @@ zapdev services logs ../my-worktree --service api --lines 50 --non-interactive -
 `prepare-repo` clones/resets only its disposable checkout under `ZD_REPOS_DIR/[group/]owner__repo`.
 **It discards tracked edits and untracked non-ignored files there.**
 It must be explicitly requested, not used as an automatic prerequisite.
+With `--group`, it links secrets and runs preparation commands for the group, then for the selected repository, even when both have resources.
+Without `--group`, it prepares only the repository's own resources, never its parent's.
+A repository is always required.
 
 `update-repo` fetches and fast-forwards the enclosing repository or immediate child repositories without resetting, cleaning, stashing, rebasing or pushing.
 Without `--branch`, prompts for each repository in a terminal: the first input is empty, subsequent inputs reuse the previous answer, and an empty answer keeps that repository's current branch.
@@ -316,7 +319,7 @@ Failures preserve completed worktrees and report their `paths`; inspect them bef
 
 For a checkout `~/.zapdev/repos/my-group/owner__repo`, place configuration at `~/.zapdev/config/my-group/owner__repo/zapdev.json` and secret files under `~/.zapdev/secrets/my-group/owner__repo/`.
 With a custom `ZD_REPOS_DIR`, the same relative identity is used beneath `~/.zapdev/config` and `~/.zapdev/secrets`.
-Configuration and secrets resolve independently: repository first, otherwise direct parent; group first, otherwise immediate child repositories.
+Except for `prepare-repo` (see above), configuration and secrets resolve independently: repository first, otherwise direct parent; group first, otherwise immediate child repositories.
 There is no merging or recursive fallback.
 An existing configuration, even `{}`, prevents fallback.
 Sources outside `ZD_REPOS_DIR` skip preparation commands, secrets and services.

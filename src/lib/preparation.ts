@@ -24,14 +24,14 @@ function readSecrets(source: string, recursive: boolean): Secret[] | undefined {
   return files.length === 0 ? undefined : files;
 }
 
-/** Resolve secret files with exclusive repository/parent or group/children fallback. */
-export function resolveSecrets(selection: RepositorySelection): { path: string; value: Secret[] }[] {
-  return resolveResources(selection, "secrets", readSecrets);
+/** Resolve secret files with optional exclusive repository/parent or group/children fallback. */
+export function resolveSecrets(selection: RepositorySelection, allowFallback = true): { path: string; value: Secret[] }[] {
+  return resolveResources(selection, "secrets", readSecrets, allowFallback);
 }
 
 /** Link selected secrets, then execute preparation commands in their selected scope. */
-export async function prepareCheckouts(selection: RepositorySelection): Promise<void> {
-  for (const { path, value } of resolveSecrets(selection)) {
+export async function prepareCheckouts(selection: RepositorySelection, allowFallback = true): Promise<void> {
+  for (const { path, value } of resolveSecrets(selection, allowFallback)) {
     for (const { source, name } of value) {
       const destination = join(path, name);
       let parent = path;
@@ -47,7 +47,7 @@ export async function prepareCheckouts(selection: RepositorySelection): Promise<
       symlinkSync(source, destination);
     }
   }
-  for (const { path: cwd, value } of resolveConfigs(selection)) {
+  for (const { path: cwd, value } of resolveConfigs(selection, allowFallback)) {
     if (value.prepareCommand !== undefined) await runProcess("/bin/sh", ["-c", value.prepareCommand], { cwd });
   }
 }
@@ -91,7 +91,11 @@ export async function prepareSelection(input: { repo: string; group?: string; br
     await git(path, "rev-parse", "--verify", `${reference}^{commit}`);
     await git(path, "checkout", "--quiet", "--force", "-B", branch, reference);
     await git(path, "clean", "--quiet", "-fd");
-    await prepareCheckouts(await selectRepositories(path));
+    const selection = await selectRepositories(path);
+    if (group !== undefined) {
+      await prepareCheckouts({ ...selection, path: parent, source: parent, isRepository: false, repositories: [] }, false);
+    }
+    await prepareCheckouts(selection, false);
     return { path };
   } finally {
     rmdirSync(lock);
