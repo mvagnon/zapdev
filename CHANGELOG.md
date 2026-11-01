@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.3.0](https://github.com/mvagnon/zapdev/compare/v5.2.0...v5.3.0) (2026-10-31)
+
+
+### Features
+
+* Add optional fallback for resource resolution and propagate to prep ([8dbda4d](https://github.com/mvagnon/zapdev/commit/8dbda4d1d39cf0c03a59d69e954dfd930451b762))
+* **cli:** Open interactive command menu and route explicit or legacy commands. ([12f5253](https://github.com/mvagnon/zapdev/commit/12f52532754b875413fa515f24bce171875ccbe7))
+* **update-repo:** Add update-repo command to fast-forward repositories from their remotes without discarding local work. ([c7ec917](https://github.com/mvagnon/zapdev/commit/c7ec91726da2d9291124143d54ab8fe0e3f653f7))
+* **update-repo:** Update repositories on the chosen branch; '*' keeps current branches and fetches origin. ([46f0f0b](https://github.com/mvagnon/zapdev/commit/46f0f0b60a765622eaa178bae71f58a5df4afbd4))
+* **workspace-config:** Introduce modular repo/worktree preparation and workspace config system ([6fa8dc6](https://github.com/mvagnon/zapdev/commit/6fa8dc6219476a548095edec2a38c53fb30de347))
+
+
+### Bug Fixes
+
+* Allow cleanup from a targeted worktree or its subdirectory ([5a43cea](https://github.com/mvagnon/zapdev/commit/5a43cea80f759fe61a63d07516c551627a9870ae))
+* **cli:** Remove implicit default commit mapping in the CLI and update help and error text. ([d1e862e](https://github.com/mvagnon/zapdev/commit/d1e862eaf1961802618c60b9637532c413851ae6))
+* **worktrees:** Remove the parent workspace after the last worktree cleanup if it becomes empty or contains only symlinks. ([9c4d5b7](https://github.com/mvagnon/zapdev/commit/9c4d5b798178c9f06b0a43d1689ef4ca7ec6497e))
+
 ## [5.2.0](https://github.com/mvagnon/zapdev/compare/v5.1.0...v5.2.0) (2026-10-25)
 
 
