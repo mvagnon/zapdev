@@ -8,7 +8,6 @@ import { prepareRepoCommand } from "./commands/prepare-repo";
 import { prepareWorktreeCommand } from "./commands/prepare-worktree";
 import { reportError } from "./commands/report-error";
 import { servicesCommand } from "./commands/services";
-import { updateRepoCommand } from "./commands/update-repo";
 
 updateSettings({ withGuide: true });
 
@@ -18,7 +17,7 @@ const main = defineCommand({
     version: pkg.version,
     description: "Fast, precise git chores from your terminal.",
   },
-  subCommands: { commit: commitCommand, pr: prCommand, "prepare-repo": prepareRepoCommand, "update-repo": updateRepoCommand, "prepare-worktree": prepareWorktreeCommand, services: servicesCommand },
+  subCommands: { commit: commitCommand, pr: prCommand, "prepare-repo": prepareRepoCommand, "prepare-worktree": prepareWorktreeCommand, services: servicesCommand },
 });
 
 async function chooseCommand(): Promise<string[] | undefined> {
