@@ -96,7 +96,7 @@ export async function prepareSelection(input: { repo: string; group?: string; br
       await prepareCheckouts({ ...selection, path: parent, source: parent, isRepository: false, repositories: [] }, false);
     }
     await prepareCheckouts(selection, false);
-    return { path };
+    return { path: group === undefined ? path : parent };
   } finally {
     rmdirSync(lock);
   }

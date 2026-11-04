@@ -15,7 +15,7 @@ export const WORKSPACE_ARGS = {
 /** Optional starting path, prompted with the current directory as its default. */
 export const WORKSPACE_PATH = { type: "positional", required: false, description: "Repository, worktree, subdirectory or group; defaults to the current directory." } as const;
 
-type WorkspaceResult = { path?: string; paths?: string[]; services?: (ServiceSummary | ServiceResult)[]; error?: string };
+type WorkspaceResult = { path?: string; services?: (ServiceSummary | ServiceResult)[]; error?: string };
 type Options = { "non-interactive"?: boolean; yes?: boolean; json?: boolean };
 class Cancelled extends Error {}
 
@@ -56,7 +56,7 @@ export async function runWorkspaceTask(name: string, args: Options, run: (ui: {
       process.stdout.write(`${JSON.stringify(result)}\n`);
       return;
     }
-    for (const path of result.paths ?? (result.path && !result.services ? [result.path] : [])) log.success(path);
+    if (result.path && !result.services) log.success(result.path);
     if (result.services?.length === 0) log.info("No services configured.");
     for (const service of result.services ?? []) {
       log.info(`${service.name}: ${service.path}${service.state ? ` (${service.state})` : ""}`);

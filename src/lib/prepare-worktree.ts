@@ -7,8 +7,8 @@ import { ensureDirectory, repositoryGit as git, selectRepositories, worktreeRoot
 import { resolveConfigs } from "./workspace-config";
 
 /** Create branch-named worktrees without resetting sources; retain partial results on failure. */
-export async function prepareWorktree({ path, branch }: { path: string; branch: string }): Promise<{ paths: string[]; error?: string }> {
-  const paths: string[] = [];
+export async function prepareWorktree({ path, branch }: { path: string; branch: string }): Promise<{ path?: string; error?: string }> {
+  let preparedPath: string | undefined;
   const workspace = join(worktreeRoot(), branch.replaceAll("/", "__"));
   try {
     const selection = await selectRepositories(path);
@@ -34,11 +34,11 @@ export async function prepareWorktree({ path, branch }: { path: string; branch: 
     mkdirSync(workspace);
     for (const checkout of checkouts) {
       await git(checkout.repository, "worktree", "add", "-b", branch, "--", checkout.path, checkout.head);
-      paths.push(checkout.path);
+      preparedPath = isRepository ? checkout.path : workspace;
     }
     await prepareCheckouts({ ...selection, path: isRepository ? checkouts[0]!.path : workspace, repositories: checkouts });
-    return { paths };
+    return { path: preparedPath };
   } catch (error) {
-    return { paths, error: `Worktree preparation failed at ${workspace}: ${error instanceof Error ? error.message : String(error)}` };
+    return { path: preparedPath, error: `Worktree preparation failed at ${workspace}: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
