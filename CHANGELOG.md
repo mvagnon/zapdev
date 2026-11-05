@@ -1,5 +1,27 @@
 # Changelog
 
+## [6.0.0](https://github.com/mvagnon/zapdev/compare/v5.3.0...v6.0.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* Return a single path field from workspace and worktree preparations instead of paths array.
+* **update-repo:** Remove update-repo command and its CLI binding, reflecting deletion of repository update feature.
+
+### Features
+
+* **pr:** prompt to create PRs for destinations after commit in interactive mode ([8eeb9d2](https://github.com/mvagnon/zapdev/commit/8eeb9d25cbd711719bec6042488dd345eb9de526))
+
+
+### Miscellaneous Chores
+
+* **update-repo:** Remove update-repo command and its CLI binding, reflecting deletion of repository update feature. ([a88f068](https://github.com/mvagnon/zapdev/commit/a88f06853f9bd501c7cc7648a6ba05e46de8fcfc))
+
+
+### Code Refactoring
+
+* Return a single path field from workspace and worktree preparations instead of paths array. ([f371f8c](https://github.com/mvagnon/zapdev/commit/f371f8cf28259793b39ad5b609e826ce39996ca7))
+
 ## [5.3.0](https://github.com/mvagnon/zapdev/compare/v5.2.0...v5.3.0) (2026-10-31)
 
 
