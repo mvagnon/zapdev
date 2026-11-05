@@ -1,7 +1,7 @@
 import { basename, resolve } from "node:path";
 import { styleText } from "node:util";
 
-import { defineCommand } from "citty";
+import { defineCommand, runCommand } from "citty";
 import {
   cancel,
   confirm,
@@ -40,6 +40,7 @@ import { generateCommitMessage } from "../lib/llm";
 import type { CommitType } from "../types/commit";
 import type { DiffStats, GitOutputReporter, HookReporter } from "../types/git";
 import { runTask } from "./git-task";
+import { prCommand } from "./pr";
 import { reportError } from "./report-error";
 
 type Repository = { repo: string; label: string; pendingLabel: string };
@@ -290,6 +291,25 @@ export const commitCommand = defineCommand({
             if (result.status === "rejected") throw new Error(`${destinations[index]!.label}: ${errorMessage(result.reason)}`);
           }
         });
+        if (interactive && !skipPrompts) {
+          for (const { repo, label } of destinations) {
+            const answer = await confirm({
+              message: `${label}: create a PR?`,
+              initialValue: false,
+            });
+            if (isCancel(answer)) {
+              cancel("Committed and pushed. PR creation cancelled.");
+              return;
+            }
+            if (!answer) continue;
+            await runCommand(prCommand, {
+              rawArgs: [repo, ...Object.keys(LLM_ARGS).flatMap((key) => {
+                const value = args[key as keyof typeof LLM_ARGS];
+                return value === undefined ? [] : [`--${key}=${value}`];
+              })],
+            });
+          }
+        }
       }
 
       if (interactive) outro("Done.");
