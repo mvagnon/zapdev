@@ -1,3 +1,8 @@
+> [!CAUTION]
+> **DEPRECATED**
+>
+> This project is deprecated and no longer maintained.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/mvagnon/zapdev/main/.github/assets/preview.gif" alt="zapdev CLI demonstration">
 </p>
